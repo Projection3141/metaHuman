@@ -15,12 +15,6 @@ cd metaHuman
 npm install
 ```
 
-### env 파일 생성 후 입력
-```
-REDDIT_USERNAME=[아이디]
-REDDIT_PASSWORD=[비밀번호]
-```
-
 ### 실행
 
 ```powershell
