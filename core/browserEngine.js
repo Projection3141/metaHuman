@@ -1,16 +1,6 @@
 /**
  * core/browserEngine.js
- *
- * =============================================================================
  * 공통 브라우저 엔진
- * =============================================================================
- *
- * 변경 사항:
- *  1) profiles.json 로드 지원
- *  2) storageKey / localeProfileKey 분리
- *  3) globals / profiles 설정 실제 반영
- *  4) mobile 설정은 옵션으로 on/off 가능
- * =============================================================================
  */
 
 const fs = require("fs");
@@ -24,26 +14,83 @@ const { gotoUrlSafe, waitForSelectorSafe, safeWaitForFunction } = require("./nav
 puppeteerExtra.use(StealthPlugin());
 
 /** ****************************************************************************
+ * 공통 경로 유틸
+ ******************************************************************************/
+function firstExisting(paths) {
+  for (const p of paths) {
+    if (!p) continue;
+    try {
+      if (fs.existsSync(p)) return p;
+    } catch {
+      /** ignore */
+    }
+  }
+  return null;
+}
+
+function getReadableAppPath(...segments) {
+  const rel = path.join(...segments);
+
+  const candidates = [
+    /** 개발 환경 app root */
+    process.env.BOT_APP_ROOT ? path.join(process.env.BOT_APP_ROOT, rel) : null,
+
+    /** 패키징 후 unpacked */
+    process.env.BOT_RESOURCES_PATH
+      ? path.join(process.env.BOT_RESOURCES_PATH, "app.asar.unpacked", rel)
+      : null,
+
+    /** 패키징 후 asar */
+    process.env.BOT_RESOURCES_PATH
+      ? path.join(process.env.BOT_RESOURCES_PATH, "app.asar", rel)
+      : null,
+
+    /** 현재 파일 기준 개발 fallback */
+    path.resolve(__dirname, "..", rel),
+  ];
+
+  return firstExisting(candidates) || candidates.find(Boolean);
+}
+
+/** ****************************************************************************
  * profiles.json 로드
  ******************************************************************************/
+const DEFAULT_PROFILE_FILE = getReadableAppPath("profiles.json");
+
 const PROFILE_STORE = {
-  filePath: path.resolve(process.cwd(), "profiles.json"),
+  filePath: DEFAULT_PROFILE_FILE,
   loadedAt: 0,
   defaultKey: "kr",
   globals: {},
   profiles: {},
 };
 
-function loadProfiles(filePath = PROFILE_STORE.filePath) {
-  const abs = path.isAbsolute(filePath) ? filePath : path.resolve(process.cwd(), filePath);
+function loadProfiles(filePath = DEFAULT_PROFILE_FILE) {
+  const abs = path.isAbsolute(filePath)
+    ? filePath
+    : getReadableAppPath(filePath);
+
+  if (!abs || !fs.existsSync(abs)) {
+    console.warn("[browserEngine] profiles.json not found, using defaults:", abs);
+
+    PROFILE_STORE.filePath = abs || "";
+    PROFILE_STORE.loadedAt = Date.now();
+    PROFILE_STORE.defaultKey = "kr";
+    PROFILE_STORE.globals = {};
+    PROFILE_STORE.profiles = {};
+    return;
+  }
+
   const txt = fs.readFileSync(abs, "utf8");
   const parsed = JSON.parse(txt);
 
   PROFILE_STORE.filePath = abs;
   PROFILE_STORE.loadedAt = Date.now();
   PROFILE_STORE.defaultKey = typeof parsed?.default === "string" ? parsed.default : "kr";
-  PROFILE_STORE.globals = parsed?.globals && typeof parsed.globals === "object" ? parsed.globals : {};
-  PROFILE_STORE.profiles = parsed?.profiles && typeof parsed.profiles === "object" ? parsed.profiles : {};
+  PROFILE_STORE.globals =
+    parsed?.globals && typeof parsed.globals === "object" ? parsed.globals : {};
+  PROFILE_STORE.profiles =
+    parsed?.profiles && typeof parsed.profiles === "object" ? parsed.profiles : {};
 }
 
 function getGlobals() {
@@ -99,7 +146,12 @@ function baseChromeArgs({ width, height, extraArgs = [] }) {
  * userDataDir
  ******************************************************************************/
 function getProfilesBaseDir() {
-  const base = path.resolve(process.cwd(), ".puppeteer_profiles");
+  /** child process에서 main이 주입한 경로를 최우선 사용 */
+  const userDataRoot =
+    process.env.BOT_USER_DATA ||
+    path.join(os.homedir(), ".automation-bot");
+
+  const base = path.join(userDataRoot, "puppeteer_profiles");
   ensureDir(base);
   return base;
 }
@@ -292,6 +344,7 @@ async function openPage(opts = {}) {
     userDataDirMode = "persistent",
     tag = "page",
     useMobile = false,
+    launchArgs = [],
   } = opts;
 
   if (!url) throw new Error("openPage: url is required");
@@ -303,6 +356,7 @@ async function openPage(opts = {}) {
     width: viewport.width,
     height: viewport.height,
     userDataDirMode,
+    launchArgs,
   });
 
   let page = await browser.newPage();
@@ -329,7 +383,6 @@ async function openPage(opts = {}) {
     timeout: 30000,
   });
 
-  // 페이지가 완전히 로드될 때까지 대기
   page = await safeWaitForFunction(
     page,
     () => document.body && document.body.children.length > 0,

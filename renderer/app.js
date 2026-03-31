@@ -6,11 +6,36 @@
  * =============================================================================
  *
  * 역할:
- *  1) 초기 bot 상태 목록 로드
- *  2) 카드 UI 렌더링
- *  3) Start / Stop 버튼 이벤트 연결
- *  4) status / log 이벤트 실시간 반영
- *  5) 로그 필터 / 로그 초기화 지원
+ *  1) 초기 봇 상태 목록 로드 및 UI 렌더링
+ *  2) 카드 UI를 통해 봇 시작/중지 제어
+ *  3) 상태 및 로그 이벤트를 실시간 반영
+ *  4) 로그 필터링 및 초기화 기능 제공
+ *  5) 실행 이력 및 계정 관리 UI
+ *
+ * 포함된 함수들:
+ *  - renderHeadlessToggle(): 헤드리스 토글 렌더링
+ *  - renderBotConfig(): 봇 설정 UI 렌더링
+ *  - updateBotConfigUI(): 봇 설정 UI 업데이트
+ *  - handleBotConfigInput(event): 봇 설정 입력 처리
+ *  - getBadgeClass(status): 상태 배지 클래스 반환
+ *  - renderBots(): 봇 카드 렌더링
+ *  - escapeHtml(str): HTML 이스케이프
+ *  - renderLogs(): 로그 렌더링
+ *  - refreshBots(): 봇 목록 새로고침
+ *  - handleBotActionClick(event): 봇 액션 클릭 처리
+ *  - loadHistory(): 이력 로드
+ *  - renderHistory(history): 이력 렌더링
+ *  - showHistory(): 이력 패널 표시
+ *  - hideHistory(): 이력 패널 숨김
+ *  - loadAccounts(): 계정 로드
+ *  - renderAccounts(): 계정 렌더링
+ *  - showAccount(): 계정 패널 표시
+ *  - hideAccount(): 계정 패널 숨김
+ *  - showAccountModal(): 계정 추가 모달 표시
+ *  - hideAccountModal(): 계정 추가 모달 숨김
+ *  - addAccountFromModal(): 모달에서 계정 추가
+ *  - removeAccount(name): 계정 삭제
+ *  - init(): 초기화 및 이벤트 연결
  * =============================================================================
  */
 

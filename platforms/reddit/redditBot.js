@@ -2,50 +2,23 @@
  * platforms/reddit/redditBot.js
  *
  * =============================================================================
- * Reddit 고수준 기능 API
+ * REDDIT HIGH-LEVEL API
  * =============================================================================
  *
- * 이 파일은 "외부에서 실제로 사용하는 기능"만 노출한다.
+ * 역할:
+ *  - Reddit 자동화의 고수준 API 제공
+ *  - 외부에서 사용하는 주요 기능만 노출
+ *  - 흐름 제어에 집중, 세부 DOM 조작은 redditInternals.js에서 처리
  *
- * 제공 기능:
- *
- * 1) enterSite()
- *    - Reddit 진입
- *    - temp profile 사용 가능
- *    - page/browser 반환
- *
- * 2) gotoUrlSafe()
- *    - detached frame 대응 포함 안전 이동
- *
- * 3) loginRedditAuto(page, { username, password })
- *    - Reddit 로그인 페이지 이동
- *    - shadow DOM 기반 username/password 입력
- *    - 로그인 버튼 클릭
- *
- * 4) searchAndScroll(page, { keyword, rounds, delayMs })
- *    - 검색 페이지 이동
- *    - 여러 번 스크롤하여 결과 lazy load 유도
- *
- * 5) enterSubreddit(page, subredditName)
- *    - 특정 서브레딧 진입
- *
- * 6) createTextPost(page, { pickValue, title, body })
- *    - u/... 또는 r/... 기준 submit URL 직접 구성
- *    - 제목 입력
- *    - 본문 입력
- *    - 게시 버튼 클릭
- *
- * 7) createComment(page, { url, commentText })
- *    - 글 URL 이동
- *    - 댓글 버튼 클릭
- *    - 댓글 editor 탐색
- *    - 댓글 입력
- *    - 댓글 등록
- *
- * 설계 포인트:
- *  - 이 파일은 "흐름 제어"에 집중한다.
- *  - 실제 DOM 조작, shadow DOM 접근, BFS 탐색 등은
- *    redditInternals.js가 담당한다.
+ * 포함된 함수들:
+ *  - enterSite(options): Reddit 사이트 진입
+ *  - gotoUrlSafe(page, url, opts): 안전한 URL 이동
+ *  - loginRedditAuto(page, credentials): 자동 로그인
+ *  - searchAndScroll(page, options): 검색 및 스크롤
+ *  - enterSubreddit(page, subredditName): 서브레딧 진입
+ *  - createTextPost(page, options): 텍스트 포스트 생성
+ *  - createComment(page, options): 댓글 생성
+ *  - commentOnSearchResults(page, options): 검색 결과에 댓글
  * =============================================================================
  */
 
@@ -75,14 +48,18 @@ const {
   clickCommentSubmitButtonDeep,
 } = require("./redditInternals");
 
-/** ****************************************************************************
- * 1) Reddit 진입
- *
- * 단계:
- *  - 공통 browserEngine.openPage() 사용
- *  - Reddit은 detached frame 이슈를 줄이기 위해 temp profile 기본 사용
- *  - 첫 진입 URL은 기본적으로 reddit.com
- ******************************************************************************/
+/**
+ * Reddit 사이트에 진입하는 함수
+ * @param {Object} options - 진입 옵션
+ * @param {string} options.targetUrl - 대상 URL (기본: reddit.com)
+ * @param {string} options.storageKey - 저장소 키
+ * @param {string} options.localeProfileKey - 로케일 프로필 키
+ * @param {boolean} options.headless - 헤드리스 모드
+ * @param {Object} options.viewport - 뷰포트 설정
+ * @param {boolean} options.useTempProfile - 임시 프로필 사용 여부
+ * @returns {Promise<Object>} 페이지 객체를 포함한 결과
+ * 로직: browserEngine.openPage를 호출하여 Reddit 페이지 열기, 임시 프로필 사용으로 detached frame 이슈 방지
+ */
 async function enterSite({
   targetUrl = "https://www.reddit.com/",
   storageKey = "reddit_main",
@@ -100,7 +77,7 @@ async function enterSite({
     userDataDirMode: useTempProfile ? "temp" : "persistent",
     useMobile: false,
     tag: "reddit.page",
-    args: [
+    launchArgs: [
       "--no-sandbox",
       "--disable-setuid-sandbox"
     ]
@@ -291,7 +268,7 @@ function parseDateRange(range) {
 
   const from = toEpoch(startRaw);
   const to = toEpoch(endRaw || startRaw);
-
+   
   return { from, to };
 }
 

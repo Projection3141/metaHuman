@@ -6,16 +6,36 @@
  * =============================================================================
  *
  * 역할:
- *  1) Electron BrowserWindow 생성
+ *  1) Electron BrowserWindow 생성 및 관리
  *  2) preload.js를 통해 renderer와 안전하게 IPC 연결
- *  3) 각 플랫폼 runner를 child process로 실행 / 중지
+ *  3) 각 플랫폼 봇을 child process로 실행 및 중지
  *  4) stdout / stderr 로그를 renderer로 실시간 전달
- *  5) 각 bot 상태(idle/running/stopped/error) 관리
+ *  5) 각 봇 상태(idle/running/stopped/error) 관리
+ *  6) 실행 이력 및 계정 관리
  *
  * 왜 child process로 실행하나?
  *  - Puppeteer 브라우저 자동화는 프로세스를 분리하는 편이 안정적이다.
  *  - Reddit / Instagram / DCInside가 서로 브라우저/메모리/예외를 독립적으로 처리할 수 있다.
  *  - 기존 run*.js를 큰 수정 없이 재사용할 수 있다.
+ *
+ * 포함된 함수들:
+ *  - getUserDataRoot(): 사용자 데이터 루트 경로 반환
+ *  - getHistoryDir(): 이력 저장 디렉터리 경로 반환
+ *  - getHistoryFile(): 이력 파일 경로 반환
+ *  - getAccountFile(): 계정 파일 경로 반환
+ *  - ensureHistoryDir(): 이력 디렉터리 생성 보장
+ *  - appendHistory(entry): 이력에 항목 추가
+ *  - readHistory(): 이력 읽기
+ *  - readAccounts(): 계정 읽기
+ *  - writeAccounts(accounts): 계정 쓰기
+ *  - addAccount(name, username, password): 계정 추가
+ *  - removeAccount(name): 계정 삭제
+ *  - getAppResourcePath(...segments): 앱 리소스 경로 반환
+ *  - createWindow(): 브라우저 윈도우 생성
+ *  - getMainWindow(): 메인 윈도우 가져오기
+ *  - sendStatus(key): 상태 전송
+ *  - sendLog(payload): 로그 전송
+ *  - pushLog(key, level, message): 로그 푸시
  * =============================================================================
  */
 
@@ -27,23 +47,50 @@ const { app, BrowserWindow, ipcMain } = require("electron");
 const { spawn, exec } = require("child_process");
 
 /** ****************************************************************************
- * 이력 저장 경로
+ * 앱 이름 고정
  ******************************************************************************/
-function getHistoryDir() {
-  return path.join(app.getPath("userData"), "meta-human", "history");
+app.setName("automation-bot");
+
+/** ****************************************************************************
+ * 사용자 데이터 루트 경로 반환
+ * @returns {string} Electron의 userData 경로
+ * 로직: app.getPath("userData")를 사용하여 Electron의 사용자 데이터 디렉터리를 반환
+ ******************************************************************************/
+function getUserDataRoot() {
+  return app.getPath("userData");
 }
 
-function getHistoryFile() {
-  return path.join(getHistoryDir(), "history.log");
+/** ****************************************************************************
+ * 이력 저장 디렉터리 경로 반환
+ * @returns {string} 이력 디렉터리 경로
+ * 로직: getUserDataRoot()와 path.join을 사용하여 "meta-human/history" 경로를 구성
+ ******************************************************************************/
+function getHistoryDir() {
+  return path.join(getUserDataRoot(), "meta-human", "history");
 }
+
+/** ****************************************************************************
+ * 이력 파일 경로 반환
+ * @returns {string} 이력 파일 경로
+ * 로직: getHistoryDir()와 path.join을 사용하여 "history.log" 파일 경로를 구성
+ ******************************************************************************/
 
 /** ****************************************************************************
  * 계정 저장 경로
  ******************************************************************************/
+/** ****************************************************************************
+ * 계정 파일 경로 반환
+ * @returns {string} 계정 파일 경로
+ * 로직: getUserDataRoot()와 path.join을 사용하여 "account.json" 파일 경로를 구성
+ ******************************************************************************/
 function getAccountFile() {
-  return path.join(app.getPath("userData"), "meta-human", "account.json");
+  return path.join(getUserDataRoot(), "account.json");
 }
 
+/** ****************************************************************************
+ * 이력 디렉터리 생성 보장
+ * 로직: fs.mkdirSync를 사용하여 getHistoryDir() 경로의 디렉터리를 재귀적으로 생성, 에러 발생 시 무시
+ ******************************************************************************/
 function ensureHistoryDir() {
   try {
     fs.mkdirSync(getHistoryDir(), { recursive: true });
@@ -68,10 +115,12 @@ function appendHistory(entry) {
 function readHistory() {
   try {
     ensureHistoryDir();
+
     const historyFile = getHistoryFile();
     if (!fs.existsSync(historyFile)) return [];
 
     const raw = fs.readFileSync(historyFile, "utf8");
+
     return raw
       .split(/\r?\n/)
       .filter(Boolean)
@@ -133,6 +182,21 @@ function removeAccount(name) {
 }
 
 /** ****************************************************************************
+ * 앱 리소스 / 스크립트 경로
+ ******************************************************************************/
+function getAppResourcePath(...segments) {
+  if (app.isPackaged) {
+    const unpackedPath = path.join(process.resourcesPath, "app.asar.unpacked", ...segments);
+    if (fs.existsSync(unpackedPath)) return unpackedPath;
+
+    const asarPath = path.join(process.resourcesPath, "app.asar", ...segments);
+    if (fs.existsSync(asarPath)) return asarPath;
+  }
+
+  return path.join(__dirname, ...segments);
+}
+
+/** ****************************************************************************
  * 봇 정의
  *
  * key:
@@ -148,17 +212,17 @@ const BOT_DEFS = {
   reddit: {
     key: "reddit",
     label: "Reddit",
-    runnerPath: path.join(process.cwd(), "platforms", "reddit", "runReddit.js"),
+    runnerPath: getAppResourcePath("platforms", "reddit", "runReddit.js"),
   },
   instagram: {
     key: "instagram",
     label: "Instagram",
-    runnerPath: path.resolve(__dirname, "platforms", "instagram", "runInstagram.js"),
+    runnerPath: getAppResourcePath("platforms", "instagram", "runInstagram.js"),
   },
   dc: {
     key: "dc",
     label: "DCInside",
-    runnerPath: path.resolve(__dirname, "platforms", "dcinside", "runDcinside.js"),
+    runnerPath: getAppResourcePath("platforms", "dcinside", "runDcinside.js"),
   },
 };
 
@@ -340,6 +404,10 @@ async function startBot(key, options = {}) {
     return { ok: false, error: `Unknown bot: ${key}` };
   }
 
+  if (!fs.existsSync(def.runnerPath)) {
+    return { ok: false, error: `Runner not found: ${def.runnerPath}` };
+  }
+
   const current = RUNNING.get(key);
   if (current?.child && !current.child.killed) {
     return { ok: false, error: `${key} is already running` };
@@ -349,6 +417,12 @@ async function startBot(key, options = {}) {
     ...process.env,
     ELECTRON_RUN_AS_NODE: "1",
     BOT_HEADLESS: options.headless ? "1" : "0",
+
+    /** child process가 참조할 경로들 */
+    BOT_USER_DATA: getUserDataRoot(),
+    BOT_APP_ROOT: app.getAppPath(),
+    BOT_RESOURCES_PATH: process.resourcesPath,
+    BOT_APP_NAME: app.getName(),
   };
 
   // 계정 정보 설정
@@ -371,7 +445,7 @@ async function startBot(key, options = {}) {
     process.execPath,
     [def.runnerPath],
     {
-      cwd: process.cwd(),
+      cwd: getUserDataRoot(),
       env,
       stdio: ["ignore", "pipe", "pipe"],
     }

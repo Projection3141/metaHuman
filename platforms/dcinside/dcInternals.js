@@ -582,7 +582,8 @@ async function crawlGallary(page, opts = {}) {
     `[dc][crawl] FINISH total=${finalItems.length} pagesVisited=${pagesVisited} stopReason=${stopReason}`
   );
 
-  const safeDir = path.resolve(process.cwd(), outDir);
+  const baseOut = process.env.BOT_USER_DATA || process.cwd();
+  const safeDir = path.resolve(baseOut, outDir);
   await fs.promises.mkdir(safeDir, { recursive: true });
 
   const ts = new Date().toISOString().replace(/[:.]/g, "-");

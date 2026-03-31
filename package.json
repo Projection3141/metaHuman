@@ -12,6 +12,10 @@
     "dc": "node platforms/dcinside/runDcinside.js"
   },
   "build": {
+    "asar": true,
+    "asarUnpack": [
+      "bin/**/*"
+    ],
     "appId": "xyz.tailorchain.IBMS",
     "productName": "integrated-bot-management-system",
     "directories": {

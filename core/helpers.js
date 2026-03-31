@@ -42,23 +42,59 @@ function ensureDir(dirPath) {
 }
 
 /** ****************************************************************************
- * 절대경로 변환
+ * 존재하는 첫 경로 반환
  ******************************************************************************/
-function resolveAbsolutePath(targetPath) {
-  if (!targetPath) throw new Error("resolveAbsolutePath: targetPath is required");
-  return path.isAbsolute(targetPath)
-    ? targetPath
-    : path.resolve(process.cwd(), targetPath);
+function firstExisting(paths) {
+  for (const p of paths) {
+    if (!p) continue;
+    try {
+      if (fs.existsSync(p)) return p;
+    } catch {
+      /** ignore */
+    }
+  }
+  return null;
+}
+
+/** ****************************************************************************
+ * 읽기용 앱 리소스 경로 해석
+ ******************************************************************************/
+function resolveReadablePath(targetPath, { baseDir } = {}) {
+  if (!targetPath) {
+    throw new Error("resolveReadablePath: targetPath is required");
+  }
+
+  if (path.isAbsolute(targetPath)) {
+    return targetPath;
+  }
+
+  const normalized = String(targetPath).replace(/^[/\\]+/, "");
+
+  const candidates = [
+    baseDir ? path.resolve(baseDir, normalized) : null,
+    process.env.BOT_APP_ROOT ? path.resolve(process.env.BOT_APP_ROOT, normalized) : null,
+    process.env.BOT_RESOURCES_PATH
+      ? path.join(process.env.BOT_RESOURCES_PATH, "app.asar.unpacked", normalized)
+      : null,
+    process.env.BOT_RESOURCES_PATH
+      ? path.join(process.env.BOT_RESOURCES_PATH, "app.asar", normalized)
+      : null,
+    path.resolve(process.cwd(), normalized),
+  ];
+
+  return firstExisting(candidates) || candidates.find(Boolean);
 }
 
 /** ****************************************************************************
  * 파일 읽기 가능 여부 확인
  ******************************************************************************/
-async function assertReadableFile(targetPath) {
-  const abs = resolveAbsolutePath(targetPath);
+async function assertReadableFile(targetPath, opts = {}) {
+  const abs = resolveReadablePath(targetPath, opts);
+
   await fs.promises.access(abs, fs.constants.R_OK).catch(() => {
     throw new Error(`File not readable: ${abs}`);
   });
+
   return abs;
 }
 
@@ -136,7 +172,7 @@ async function setValue(page, selector, value, { timeout = 20000, delay = 25 } =
 module.exports = {
   sleep,
   ensureDir,
-  resolveAbsolutePath,
+  resolveReadablePath,
   assertReadableFile,
   domClick,
   setValue,
