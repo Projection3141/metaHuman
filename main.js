@@ -43,7 +43,7 @@ require("dotenv").config();
 
 const fs = require("fs");
 const path = require("path");
-const { app, BrowserWindow, ipcMain } = require("electron");
+const { app, BrowserWindow, ipcMain, utilityProcess } = require("electron");
 const { spawn, exec } = require("child_process");
 
 /** ****************************************************************************
@@ -325,44 +325,195 @@ function pushLog(key, level, message) {
 }
 
 /** ****************************************************************************
+ * 종료 이벤트 1회 대기
+ *
+ * utilityProcess: exit 중심
+ ******************************************************************************/
+function waitForChildExit(child, timeoutMs = 5000) {
+  return new Promise((resolve) => {
+    if (!child) {
+      resolve({ code: null, signal: null, timedOut: false });
+      return;
+    }
+
+    let settled = false;
+
+    /** 종료 처리 공통 */
+    function done(result) {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      resolve(result);
+    }
+
+    /** 이벤트 해제 */
+    function cleanup() {
+      clearTimeout(timer);
+
+      try { child.off?.("exit", onExit); } catch {}
+      try { child.off?.("error", onError); } catch {}
+
+      /** EventEmitter 호환성 */
+      try { child.removeListener?.("exit", onExit); } catch {}
+      try { child.removeListener?.("error", onError); } catch {}
+    }
+
+    /** utilityProcess / child_process 공통 */
+    function onExit(code, signal) {
+      done({ code, signal, timedOut: false, event: "exit" });
+    }
+
+    /** spawn/kill 실패 */
+    function onError(err) {
+      done({
+        code: null,
+        signal: null,
+        timedOut: false,
+        event: "error",
+        error: String(err?.message || err || ""),
+      });
+    }
+
+    const timer = setTimeout(() => {
+      done({ code: null, signal: null, timedOut: true, event: "timeout" });
+    }, timeoutMs);
+
+    try { child.once?.("exit", onExit); } catch {}
+    try { child.once?.("error", onError); } catch {}
+  });
+}
+
+/** ****************************************************************************
  * Windows / Unix 계열 프로세스 트리 종료
  *
+ *  1) 종료 신호/명령을 보냄
+ *  2) 실제 종료 이벤트까지 기다림
+ *  3) timeout이면 실패로 간주
+ * 
  * 설명:
  *  - Puppeteer/Chrome는 자식 프로세스를 여러 개 띄운다.
  *  - 단순 child.kill()만으로는 일부가 남을 수 있다.
  *  - 그래서 Windows에서는 taskkill /T /F 사용
  *  - Unix 계열에서는 기본 kill 후 필요하면 강제 종료
  ******************************************************************************/
-function killProcessTree(child) {
-  return new Promise((resolve) => {
-    if (!child || !child.pid) {
-      resolve();
-      return;
-    }
+async function killProcessTree(child, timeoutMs = 5000) {
+  if (!child) {
+    return { ok: true, alreadyStopped: true };
+  }
 
-    /** Windows */
-    if (process.platform === "win32") {
-      exec(`taskkill /pid ${child.pid} /T /F`, () => {
-        resolve();
-      });
-      return;
-    }
+  /** pid 없으면 이미 종료됐을 가능성 큼 */
+  const pid = child.pid;
+  if (!pid) {
+    const exitInfo = await waitForChildExit(child, 300);
+    return {
+      ok: !exitInfo.timedOut,
+      alreadyStopped: true,
+      ...exitInfo,
+    };
+  }
 
-    /** macOS / Linux */
-    try {
-      child.kill("SIGTERM");
-    } catch {
-      /** ignore */
-    }
+  /** Windows */
+  if (process.platform === "win32") {
+    const killer = exec(`taskkill /pid ${pid} /T /F`);
+    const exitInfo = await waitForChildExit(child, timeoutMs);
 
-    setTimeout(() => {
-      try {
-        child.kill("SIGKILL");
-      } catch {
-        /** ignore */
-      }
-      resolve();
-    }, 1500);
+    return {
+      ok: !exitInfo.timedOut,
+      ...exitInfo,
+    };
+  }
+
+  /** POSIX 1차: graceful */
+  try {
+    child.kill("SIGTERM");
+  } catch {
+    /** ignore */
+  }
+
+  let exitInfo = await waitForChildExit(child, 1500);
+  if (!exitInfo.timedOut) {
+    return { ok: true, ...exitInfo };
+  }
+
+  /** POSIX 2차: force */
+  try {
+    child.kill("SIGKILL");
+  } catch {
+    /** ignore */
+  }
+
+  exitInfo = await waitForChildExit(child, timeoutMs);
+  return {
+    ok: !exitInfo.timedOut,
+    ...exitInfo,
+  };
+}
+
+/** ****************************************************************************
+ * 종료 후 상태 반영 공통
+ *
+ * utilityProcess는 exit 이벤트로 처리
+ ******************************************************************************/
+function finalizeBotState(key, code, requestedStop) {
+  BOT_STATE[key] = {
+    ...BOT_STATE[key],
+    status: requestedStop ? "stopped" : code === 0 ? "stopped" : "error",
+    pid: null,
+    exitCode: Number.isInteger(code) ? code : null,
+    lastError:
+      requestedStop || code === 0
+        ? ""
+        : `Process exited with code ${Number.isInteger(code) ? code : "unknown"}`,
+  };
+
+  sendStatus(key);
+  pushLog(
+    key,
+    requestedStop || code === 0 ? "system" : "error",
+    `[main] ${key} exited (code=${Number.isInteger(code) ? code : "unknown"})`,
+  );
+
+  RUNNING.delete(key);
+}
+
+/** ****************************************************************************
+ * 시작부 종료 이벤트 등록
+ *
+ * 중요:
+ *  - utilityProcess는 exit 사용
+ ******************************************************************************/
+function bindChildLifecycle(key, child) {
+  let finalized = false;
+
+  function finalizeOnce(code) {
+    if (finalized) return;
+    finalized = true;
+
+    const runtime = RUNNING.get(key);
+    const requestedStop = !!runtime?.requestedStop;
+
+    finalizeBotState(key, code, requestedStop);
+  }
+
+  /** utilityProcess / child_process 공통 */
+  child.on("exit", (code) => {
+    finalizeOnce(code);
+  });
+
+  child.on("error", (err) => {
+    if (finalized) return;
+
+    BOT_STATE[key] = {
+      ...BOT_STATE[key],
+      status: "error",
+      pid: null,
+      lastError: String(err?.message || err || ""),
+    };
+
+    sendStatus(key);
+    pushLog(key, "error", `[main] failed to start ${key}: ${err?.message || err}`);
+    RUNNING.delete(key);
+    finalized = true;
   });
 }
 
@@ -409,23 +560,22 @@ async function startBot(key, options = {}) {
   }
 
   const current = RUNNING.get(key);
-  if (current?.child && !current.child.killed) {
+
+  /** utilityProcess까지 고려하면 killed 대신 pid 확인이 더 안전 */
+  if (current?.child?.pid) {
     return { ok: false, error: `${key} is already running` };
   }
 
   const env = {
     ...process.env,
-    ELECTRON_RUN_AS_NODE: "1",
+    /* ELECTRON_RUN_AS_NODE: "1", */
     BOT_HEADLESS: options.headless ? "1" : "0",
-
-    /** child process가 참조할 경로들 */
     BOT_USER_DATA: getUserDataRoot(),
     BOT_APP_ROOT: app.getAppPath(),
     BOT_RESOURCES_PATH: process.resourcesPath,
     BOT_APP_NAME: app.getName(),
   };
 
-  // 계정 정보 설정
   if (options.account) {
     env.BOT_USERNAME = options.account.username;
     env.BOT_PASSWORD = options.account.password;
@@ -436,25 +586,16 @@ async function startBot(key, options = {}) {
     if (cfg.subreddit) env.REDDIT_TARGET_SUBREDDIT = cfg.subreddit;
     if (cfg.keyword) env.REDDIT_TARGET_KEYWORD = cfg.keyword;
     if (cfg.dateRange) env.REDDIT_TARGET_DATE_RANGE = cfg.dateRange;
-    if (typeof cfg.commentCount !== "undefined")
+    if (typeof cfg.commentCount !== "undefined") {
       env.REDDIT_TARGET_COMMENT_COUNT = String(cfg.commentCount);
+    }
     if (cfg.commentText) env.REDDIT_TARGET_COMMENT_TEXT = cfg.commentText;
   }
 
-  const child = spawn(
-    process.execPath,
-    [def.runnerPath],
-    {
-      cwd: getUserDataRoot(),
-      env,
-      stdio: ["ignore", "pipe", "pipe"],
-    }
-  );
-
-  console.log("[MAIN] spawn reddit runner:", def.runnerPath);
-
-  child.on("error", (err) => {
-    console.error("[MAIN] spawn error:", err);
+  const child = utilityProcess.fork(def.runnerPath, [], {
+    cwd: getUserDataRoot(),
+    env,
+    stdio: "pipe",
   });
 
   RUNNING.set(key, {
@@ -475,43 +616,7 @@ async function startBot(key, options = {}) {
   pushLog(key, "system", `[main] started ${key} (pid=${child.pid || "n/a"})`);
 
   attachChildLogStream(key, child);
-
-  child.on("error", (err) => {
-    BOT_STATE[key] = {
-      ...BOT_STATE[key],
-      status: "error",
-      lastError: String(err?.message || err || ""),
-    };
-
-    sendStatus(key);
-    pushLog(key, "error", `[main] failed to start ${key}: ${err?.message || err}`);
-    RUNNING.delete(key);
-  });
-
-  child.on("close", (code) => {
-    const runtime = RUNNING.get(key);
-    const requestedStop = !!runtime?.requestedStop;
-
-    BOT_STATE[key] = {
-      ...BOT_STATE[key],
-      status: requestedStop ? "stopped" : code === 0 ? "stopped" : "error",
-      pid: null,
-      exitCode: Number.isInteger(code) ? code : null,
-      lastError:
-        requestedStop || code === 0
-          ? ""
-          : `Process exited with code ${Number.isInteger(code) ? code : "unknown"}`,
-    };
-
-    sendStatus(key);
-    pushLog(
-      key,
-      requestedStop || code === 0 ? "system" : "error",
-      `[main] ${key} closed (code=${Number.isInteger(code) ? code : "unknown"})`,
-    );
-
-    RUNNING.delete(key);
-  });
+  bindChildLifecycle(key, child);
 
   return { ok: true };
 }
@@ -519,10 +624,11 @@ async function startBot(key, options = {}) {
 /** ****************************************************************************
  * 봇 중지
  *
- * 단계:
- *  1) 실행 중 child 확인
- *  2) requestedStop=true 표시
- *  3) 프로세스 트리 종료
+ * 핵심:
+ *  1) requestedStop 설정
+ *  2) stopping 상태 즉시 반영
+ *  3) 실제 종료 이벤트까지 기다림
+ *  4) timeout이면 강제로 error 처리
  ******************************************************************************/
 async function stopBot(key) {
   const runtime = RUNNING.get(key);
@@ -531,9 +637,33 @@ async function stopBot(key) {
   }
 
   runtime.requestedStop = true;
+
+  /** UI 즉시 반영 */
+  BOT_STATE[key] = {
+    ...BOT_STATE[key],
+    status: "stopping",
+  };
+  sendStatus(key);
+
   pushLog(key, "system", `[main] stopping ${key}...`);
 
-  await killProcessTree(runtime.child);
+  const result = await killProcessTree(runtime.child, 5000);
+
+  /** 종료 이벤트가 끝내 안 오면 여기서 정리 */
+  if (!result.ok) {
+    BOT_STATE[key] = {
+      ...BOT_STATE[key],
+      status: "error",
+      pid: null,
+      lastError: "Stop timeout: process did not emit exit/close",
+    };
+
+    sendStatus(key);
+    pushLog(key, "error", `[main] stop timeout for ${key}`);
+    RUNNING.delete(key);
+
+    return { ok: false, error: "Process stop timeout" };
+  }
 
   return { ok: true };
 }
