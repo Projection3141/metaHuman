@@ -43,8 +43,8 @@ require("dotenv").config();
 
 const fs = require("fs");
 const path = require("path");
-const { app, BrowserWindow, ipcMain, utilityProcess } = require("electron");
-const { spawn, exec } = require("child_process");
+const { app, BrowserWindow, ipcMain, utilityProcess, Menu } = require("electron");
+const { exec } = require("child_process");
 
 /** ****************************************************************************
  * 앱 이름 고정
@@ -63,10 +63,10 @@ function getUserDataRoot() {
 /** ****************************************************************************
  * 이력 저장 디렉터리 경로 반환
  * @returns {string} 이력 디렉터리 경로
- * 로직: getUserDataRoot()와 path.join을 사용하여 "meta-human/history" 경로를 구성
+ * 로직: getUserDataRoot()와 path.join을 사용하여 "history" 경로를 구성
  ******************************************************************************/
 function getHistoryDir() {
-  return path.join(getUserDataRoot(), "meta-human", "history");
+  return path.join(getUserDataRoot(), "history");
 }
 
 /** ****************************************************************************
@@ -226,11 +226,15 @@ const RUNNING = new Map();
  *  - preload만 노출
  ******************************************************************************/
 function createWindow() {
+
+  Menu.setApplicationMenu(null);
+
   const win = new BrowserWindow({
     width: 1280,
     height: 1200,
     minWidth: 1100,
     minHeight: 960,
+    autoHideMenuBar: true,
     backgroundColor: "#0f172a",
     webPreferences: {
       preload: path.resolve(__dirname, "preload.js"),
@@ -452,7 +456,7 @@ async function killProcessTree(child, timeoutMs = 5000) {
 
   /** Windows */
   if (process.platform === "win32") {
-    const killer = exec(`taskkill /pid ${pid} /T /F`);
+    exec(`taskkill /pid ${pid} /T /F`);
     const exitInfo = await waitForChildExit(child, timeoutMs);
 
     return {
@@ -646,7 +650,7 @@ async function startBot(key, options = {}) {
     if (typeof cfg.commentCount !== "undefined") {
       env.REDDIT_TARGET_COMMENT_COUNT = String(cfg.commentCount);
     }
-    if (cfg.commentText) env.REDDIT_TARGET_COMMENT_TEXT = cfg.commentText;
+    if (cfg.recommendLink) env.REDDIT_RECOMMEND_LINK = cfg.recommendLink;
   }
 
   /** ------------------------------------------------------------------------

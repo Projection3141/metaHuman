@@ -24,7 +24,7 @@ const state = {
       subreddit: "",
       keyword: "",
       commentCount: 1,
-      commentText: "",
+      recommendLink: "http://monio.co.kr/",
     },
 
     thread: {
@@ -170,10 +170,12 @@ function renderBotConfig() {
       </div>
 
       <div class="bot-config-row">
-        <label for="reddit-comment-text">댓글 내용</label>
-        <textarea id="reddit-comment-text" placeholder="댓글 텍스트...">${escapeHtml(
-          state.config.reddit.commentText,
-        )}</textarea>
+        <label for="reddit-recommend-link">추천 링크</label>
+        <input
+          id="reddit-recommend-link"
+          placeholder="http://monio.co.kr/"
+          value="${escapeHtml(state.config.reddit.recommendLink)}"
+        />
       </div>
     </div>
 
@@ -227,8 +229,8 @@ function renderBotConfig() {
       <div class="bot-config-row">
         <label for="thread-comment-text">댓글 내용</label>
         <textarea id="thread-comment-text" placeholder="댓글 텍스트...">${escapeHtml(
-          state.config.thread.commentText,
-        )}</textarea>
+    state.config.thread.commentText,
+  )}</textarea>
       </div>
     </div>
   `;
@@ -257,13 +259,13 @@ function updateBotConfigUI() {
     const subreddit = document.getElementById("reddit-subreddit");
     const keyword = document.getElementById("reddit-keyword");
     const commentCount = document.getElementById("reddit-comment-count");
-    const commentText = document.getElementById("reddit-comment-text");
+    const recommendLink = document.getElementById("reddit-recommend-link");
 
     if (dateRange) dateRange.value = state.config.reddit.dateRange;
     if (subreddit) subreddit.value = state.config.reddit.subreddit;
     if (keyword) keyword.value = state.config.reddit.keyword;
     if (commentCount) commentCount.value = state.config.reddit.commentCount;
-    if (commentText) commentText.value = state.config.reddit.commentText;
+    if (recommendLink) recommendLink.value = state.config.reddit.recommendLink;
   }
 
   if (threadConfig) {
@@ -324,8 +326,8 @@ function handleBotConfigInput(event) {
     return;
   }
 
-  if (id === "reddit-comment-text") {
-    state.config.reddit.commentText = value;
+  if (id === "reddit-recommend-link") {
+    state.config.reddit.recommendLink = value;
     return;
   }
 
@@ -486,11 +488,11 @@ function validateBotConfig(key) {
   if (key === "reddit") {
     const cfg = state.config.reddit;
 
-    if (!cfg.subreddit || !cfg.keyword || !cfg.commentText || !isPositiveNumber(cfg.commentCount)) {
+    if (!cfg.subreddit || !cfg.keyword || !cfg.recommendLink || !isPositiveNumber(cfg.commentCount)) {
       return {
         ok: false,
         message:
-          "Reddit 설정이 불완전합니다. 커뮤니티, 키워드, 댓글 개수, 댓글 내용을 모두 입력해 주세요.",
+          "Reddit 설정이 불완전합니다. 커뮤니티, 키워드, 댓글 개수, 추천 링크를 모두 입력해 주세요.",
       };
     }
 
@@ -629,19 +631,23 @@ function renderHistory(history = []) {
 
           <div class="meta">
             <div>조건: ${meta.length ? meta.join(" / ") : "-"}</div>
-            <div>댓글 내용: ${escapeHtml(config.commentText || "(없음)")}</div>
+            <div>
+              ${target === "reddit"
+                ? `추천 링크: ${escapeHtml(config.recommendLink || "(없음)")}`
+                : `댓글 내용: ${escapeHtml(config.commentText || "(없음)")}`
+              }
+            </div>
           </div>
 
           <div>
             <div style="font-weight:700; margin-bottom:6px;">댓글 단 URL</div>
             <ul class="urls">
-              ${
-                urls.length
-                  ? urls
-                    .map((url) => `<li><a href="${escapeHtml(url)}" target="_blank">${escapeHtml(url)}</a></li>`)
-                    .join("")
-                  : "<li>(없음)</li>"
-              }
+              ${urls.length
+          ? urls
+            .map((url) => `<li><a href="${escapeHtml(url)}" target="_blank">${escapeHtml(url)}</a></li>`)
+            .join("")
+          : "<li>(없음)</li>"
+        }
             </ul>
           </div>
         </div>

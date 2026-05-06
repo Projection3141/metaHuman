@@ -359,13 +359,22 @@ function parseDateRange(range) {
  */
 async function commentOnSearchResults(
   page,
-  { subreddit, keyword, dateRange, count = 1, commentText } = {},
+  { subreddit, keyword, dateRange, count = 1, commentText, createCommentText, } = {},
 ) {
   if (!page) throw new Error("commentOnSearchResults: page is required");
   if (!subreddit) throw new Error("commentOnSearchResults: subreddit is required");
   if (!keyword) throw new Error("commentOnSearchResults: keyword is required");
-  if (!commentText) throw new Error("commentOnSearchResults: commentText is required");
-  if (!count || count <= 0) return page;
+  if (!commentText && typeof createCommentText !== "function") {
+    throw new Error("commentOnSearchResults: commentText or createCommentText is required");
+  }
+
+  if (!count || count <= 0) {
+    return {
+      page,
+      urls: [],
+      posts: [],
+    };
+  }
 
   page = await ensureRedditLoggedIn(page);
 
@@ -409,15 +418,60 @@ async function commentOnSearchResults(
   });
 
   const selected = matches.slice(0, count);
-  const urls = selected.map((p) => p.url).filter(Boolean);
+  const posted = [];
 
   for (const post of selected) {
-    console.log("[reddit][comment] posting to", post.url);
-    page = await createComment(page, { url: post.url, commentText });
+    console.log("[reddit][comment] selected post:", {
+      title: post.title,
+      url: post.url,
+    });
+
+    /**
+     * 1) createCommentText가 있으면 title 기반으로 댓글 생성
+     * 2) 없으면 기존 commentText 사용
+     */
+    const nextCommentText = typeof createCommentText === "function"
+      ? await createCommentText({
+        subreddit,
+        keyword,
+        dateRange,
+        post,
+      })
+      : commentText;
+
+    if (!nextCommentText) {
+      console.log("[reddit][comment] skipped: empty generated comment", {
+        title: post.title,
+        url: post.url,
+      });
+
+      continue;
+    }
+
+    console.log("[reddit][comment] generated comment:", {
+      title: post.title,
+      commentText: nextCommentText,
+    });
+
+    page = await createComment(page, {
+      url: post.url,
+      commentText: nextCommentText,
+    });
+
+    posted.push({
+      title: post.title,
+      url: post.url,
+      commentText: nextCommentText,
+    });
+
     await sleep(1000);
   }
 
-  return { page, urls };
+  return {
+    page,
+    urls: posted.map((p) => p.url),
+    posts: posted,
+  };
 }
 
 module.exports = {

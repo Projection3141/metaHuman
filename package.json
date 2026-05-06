@@ -9,7 +9,8 @@
     "build": "electron-builder",
     "reddit": "node platforms/reddit/runReddit.js",
     "instagram": "node platforms/instagram/runInstagram.js",
-    "dc": "node platforms/dcinside/runDcinside.js"
+    "dc": "node platforms/dcinside/runDcinside.js",
+    "llm": "node test/llm/runLlm.js"
   },
   "build": {
     "asar": true,
@@ -31,6 +32,7 @@
   "dependencies": {
     "dotenv": "^17.2.4",
     "fs": "^0.0.1-security",
+    "openai": "^4.104.0",
     "path": "^0.12.7",
     "puppeteer": "^24.15.0",
     "puppeteer-extra": "^3.3.6",

@@ -8,12 +8,7 @@
  * 역할:
  *  - Reddit 자동화 시나리오를 실제로 실행하는 runner
  *  - 직접 `node runReddit.js`로 실행 가능
- *  - Electron main.js에서도 child process로 실행 가능
- * 
- * 변경 포인트:
- *  1) history 경로에서 process.cwd() 제거
- *  2) 안전한 env 파싱 추가
- *  3) success / error history 구조 정리
+ *  - Electron main.js에서도 utility process로 실행 가능
  * =============================================================================
  */
 
@@ -31,6 +26,7 @@ const {
 
 const { closeAll } = require("../../core/browserEngine");
 const { sleep } = require("../../core/helpers");
+const { createCommentRecommendingLink } = require("../../llm/runLlm");
 
 /** ****************************************************************************
  * 안전한 문자열 env 읽기
@@ -124,7 +120,10 @@ const REDDIT_TARGET_SUBREDDIT = readEnvString("REDDIT_TARGET_SUBREDDIT", "").tri
 const REDDIT_TARGET_KEYWORD = readEnvString("REDDIT_TARGET_KEYWORD", "").trim();
 const REDDIT_TARGET_DATE_RANGE = readEnvString("REDDIT_TARGET_DATE_RANGE", "").trim();
 const REDDIT_TARGET_COMMENT_COUNT = readEnvNumber("REDDIT_TARGET_COMMENT_COUNT", 0);
-const REDDIT_TARGET_COMMENT_TEXT = readEnvString("REDDIT_TARGET_COMMENT_TEXT", "").trim();
+const REDDIT_RECOMMEND_LINK = readEnvString(
+  "REDDIT_RECOMMEND_LINK",
+  "http://monio.co.kr/",
+).trim();
 
 const HEADLESS = readEnvBool("BOT_HEADLESS", false);
 
@@ -141,7 +140,7 @@ function hasCommentJobConfig() {
   return Boolean(
     REDDIT_TARGET_SUBREDDIT &&
     REDDIT_TARGET_KEYWORD &&
-    REDDIT_TARGET_COMMENT_TEXT &&
+    REDDIT_RECOMMEND_LINK &&
     REDDIT_TARGET_COMMENT_COUNT > 0
   );
 }
@@ -161,6 +160,7 @@ function getRunSummary() {
     keyword: REDDIT_TARGET_KEYWORD,
     dateRange: REDDIT_TARGET_DATE_RANGE,
     count: REDDIT_TARGET_COMMENT_COUNT,
+    recommendLink: REDDIT_RECOMMEND_LINK,
   };
 }
 
@@ -268,7 +268,13 @@ async function runReddit() {
         keyword: REDDIT_TARGET_KEYWORD,
         dateRange: REDDIT_TARGET_DATE_RANGE,
         count: REDDIT_TARGET_COMMENT_COUNT,
-        commentText: REDDIT_TARGET_COMMENT_TEXT,
+        createCommentText: async ({ post }) => {
+          return createCommentRecommendingLink({
+            subreddit: REDDIT_TARGET_SUBREDDIT,
+            title: post.title,
+            link: REDDIT_RECOMMEND_LINK,
+          });
+        },
       });
 
       page = result?.page || page;
@@ -281,7 +287,7 @@ async function runReddit() {
           keyword: REDDIT_TARGET_KEYWORD,
           dateRange: REDDIT_TARGET_DATE_RANGE,
           count: REDDIT_TARGET_COMMENT_COUNT,
-          commentText: REDDIT_TARGET_COMMENT_TEXT,
+          recommendLink: REDDIT_RECOMMEND_LINK,
         },
         result: {
           urls: Array.isArray(result?.urls) ? result.urls : [],
