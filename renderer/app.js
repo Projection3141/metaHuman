@@ -25,6 +25,7 @@ const state = {
       keyword: "",
       commentCount: 1,
       recommendLink: "http://monio.co.kr/",
+      commentLanguage: "en",  // ko: 한국어 / zh: 중국어 / ja: 일본어 / en: 영어
     },
 
     thread: {
@@ -75,6 +76,13 @@ function isPositiveNumber(value) {
 function getThreadSearchOptionLabel(value) {
   if (value === "recent") return "최근 검색";
   return "인기 검색";
+}
+
+function getRedditCommentLanguageLabel(value) {
+  if (value === "ko") return "한국어";
+  if (value === "zh") return "중국어";
+  if (value === "ja") return "일본어";
+  return "영어";
 }
 
 function pushUiLog(key, level, message) {
@@ -170,6 +178,16 @@ function renderBotConfig() {
       </div>
 
       <div class="bot-config-row">
+        <label for="reddit-comment-language">댓글 언어</label>
+        <select id="reddit-comment-language" class="select">
+          <option value="ko" ${state.config.reddit.commentLanguage === "ko" ? "selected" : ""}>한국어</option>
+          <option value="zh" ${state.config.reddit.commentLanguage === "zh" ? "selected" : ""}>중국어</option>
+          <option value="ja" ${state.config.reddit.commentLanguage === "ja" ? "selected" : ""}>일본어</option>
+          <option value="en" ${state.config.reddit.commentLanguage === "en" ? "selected" : ""}>영어</option>
+        </select>
+      </div>
+
+      <div class="bot-config-row">
         <label for="reddit-recommend-link">추천 링크</label>
         <input
           id="reddit-recommend-link"
@@ -259,12 +277,14 @@ function updateBotConfigUI() {
     const subreddit = document.getElementById("reddit-subreddit");
     const keyword = document.getElementById("reddit-keyword");
     const commentCount = document.getElementById("reddit-comment-count");
+    const commentLanguage = document.getElementById("reddit-comment-language");
     const recommendLink = document.getElementById("reddit-recommend-link");
 
     if (dateRange) dateRange.value = state.config.reddit.dateRange;
     if (subreddit) subreddit.value = state.config.reddit.subreddit;
     if (keyword) keyword.value = state.config.reddit.keyword;
     if (commentCount) commentCount.value = state.config.reddit.commentCount;
+    if (commentLanguage) commentLanguage.value = state.config.reddit.commentLanguage;
     if (recommendLink) recommendLink.value = state.config.reddit.recommendLink;
   }
 
@@ -323,6 +343,11 @@ function handleBotConfigInput(event) {
 
   if (id === "reddit-comment-count") {
     state.config.reddit.commentCount = toSafeNumber(value, 0);
+    return;
+  }
+
+  if (id === "reddit-comment-language") {
+    state.config.reddit.commentLanguage = value;
     return;
   }
 
@@ -488,11 +513,11 @@ function validateBotConfig(key) {
   if (key === "reddit") {
     const cfg = state.config.reddit;
 
-    if (!cfg.subreddit || !cfg.keyword || !cfg.recommendLink || !isPositiveNumber(cfg.commentCount)) {
+    if (!cfg.subreddit || !cfg.keyword || !cfg.recommendLink || !cfg.commentLanguage || !isPositiveNumber(cfg.commentCount)) {
       return {
         ok: false,
         message:
-          "Reddit 설정이 불완전합니다. 커뮤니티, 키워드, 댓글 개수, 추천 링크를 모두 입력해 주세요.",
+          "Reddit 설정이 불완전합니다. 커뮤니티, 키워드, 댓글 개수, 추천 링크, 댓글 언어를 모두 입력해 주세요.",
       };
     }
 
@@ -621,6 +646,10 @@ function renderHistory(history = []) {
         meta.push(`searchOption: ${escapeHtml(getThreadSearchOptionLabel(config.searchOption))}`);
       }
 
+      if (config.commentLanguage) {
+        meta.push(`language: ${escapeHtml(getRedditCommentLanguageLabel(config.commentLanguage))}`);
+      }
+
       if (typeof config.exploreMinutes !== "undefined") {
         meta.push(`exploreMinutes: ${escapeHtml(String(config.exploreMinutes))}`);
       }
@@ -632,9 +661,10 @@ function renderHistory(history = []) {
           <div class="meta">
             <div>조건: ${meta.length ? meta.join(" / ") : "-"}</div>
             <div>
-              ${target === "reddit"
-                ? `추천 링크: ${escapeHtml(config.recommendLink || "(없음)")}`
-                : `댓글 내용: ${escapeHtml(config.commentText || "(없음)")}`
+              ${
+                target === "reddit"
+                  ? `추천 링크: ${escapeHtml(config.recommendLink || "(없음)")}`
+                  : `댓글 내용: ${escapeHtml(config.commentText || "(없음)")}`
               }
             </div>
           </div>

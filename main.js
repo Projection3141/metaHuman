@@ -644,6 +644,7 @@ async function startBot(key, options = {}) {
    * ---------------------------------------------------------------------- */
   if (key === "reddit" && options.redditConfig) {
     const cfg = options.redditConfig;
+
     if (cfg.subreddit) env.REDDIT_TARGET_SUBREDDIT = cfg.subreddit;
     if (cfg.keyword) env.REDDIT_TARGET_KEYWORD = cfg.keyword;
     if (cfg.dateRange) env.REDDIT_TARGET_DATE_RANGE = cfg.dateRange;
@@ -651,6 +652,9 @@ async function startBot(key, options = {}) {
       env.REDDIT_TARGET_COMMENT_COUNT = String(cfg.commentCount);
     }
     if (cfg.recommendLink) env.REDDIT_RECOMMEND_LINK = cfg.recommendLink;
+    if (cfg.commentLanguage) {
+      env.REDDIT_COMMENT_LANGUAGE = cfg.commentLanguage;
+    }
   }
 
   /** ------------------------------------------------------------------------

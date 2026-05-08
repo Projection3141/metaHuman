@@ -120,6 +120,7 @@ const REDDIT_TARGET_SUBREDDIT = readEnvString("REDDIT_TARGET_SUBREDDIT", "").tri
 const REDDIT_TARGET_KEYWORD = readEnvString("REDDIT_TARGET_KEYWORD", "").trim();
 const REDDIT_TARGET_DATE_RANGE = readEnvString("REDDIT_TARGET_DATE_RANGE", "").trim();
 const REDDIT_TARGET_COMMENT_COUNT = readEnvNumber("REDDIT_TARGET_COMMENT_COUNT", 0);
+const REDDIT_COMMENT_LANGUAGE = readEnvString("REDDIT_COMMENT_LANGUAGE", "en").trim();
 const REDDIT_RECOMMEND_LINK = readEnvString(
   "REDDIT_RECOMMEND_LINK",
   "http://monio.co.kr/",
@@ -141,6 +142,7 @@ function hasCommentJobConfig() {
     REDDIT_TARGET_SUBREDDIT &&
     REDDIT_TARGET_KEYWORD &&
     REDDIT_RECOMMEND_LINK &&
+    REDDIT_COMMENT_LANGUAGE &&
     REDDIT_TARGET_COMMENT_COUNT > 0
   );
 }
@@ -161,6 +163,7 @@ function getRunSummary() {
     dateRange: REDDIT_TARGET_DATE_RANGE,
     count: REDDIT_TARGET_COMMENT_COUNT,
     recommendLink: REDDIT_RECOMMEND_LINK,
+    commentLanguage: REDDIT_COMMENT_LANGUAGE,
   };
 }
 
@@ -261,6 +264,7 @@ async function runReddit() {
         keyword: REDDIT_TARGET_KEYWORD,
         dateRange: REDDIT_TARGET_DATE_RANGE,
         count: REDDIT_TARGET_COMMENT_COUNT,
+        commentLanguage: REDDIT_COMMENT_LANGUAGE,
       });
 
       const result = await commentOnSearchResults(page, {
@@ -273,6 +277,7 @@ async function runReddit() {
             subreddit: REDDIT_TARGET_SUBREDDIT,
             title: post.title,
             link: REDDIT_RECOMMEND_LINK,
+            language: REDDIT_COMMENT_LANGUAGE,
           });
         },
       });
@@ -287,6 +292,7 @@ async function runReddit() {
           keyword: REDDIT_TARGET_KEYWORD,
           dateRange: REDDIT_TARGET_DATE_RANGE,
           count: REDDIT_TARGET_COMMENT_COUNT,
+          language: REDDIT_COMMENT_LANGUAGE,
           recommendLink: REDDIT_RECOMMEND_LINK,
         },
         result: {
@@ -339,6 +345,7 @@ async function runReddit() {
         keyword: REDDIT_TARGET_KEYWORD,
         dateRange: REDDIT_TARGET_DATE_RANGE,
         count: REDDIT_TARGET_COMMENT_COUNT,
+        commentLanguage: REDDIT_COMMENT_LANGUAGE,
       },
     });
 

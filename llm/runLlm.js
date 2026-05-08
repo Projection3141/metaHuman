@@ -23,6 +23,14 @@ const schema = {
     },
   },
 };
+
+function getLanguagePromptName(language) {
+  if (language === "ko") return "Korean";
+  if (language === "zh") return "Chinese";
+  if (language === "ja") return "Japanese";
+  return "English";
+}
+
 /**
  * 검색된 Reddit 게시글 title을 기반으로 링크 추천 댓글 생성
  *
@@ -35,9 +43,10 @@ const schema = {
  *  - comment string
  */
 async function createCommentRecommendingLink({
-  subreddit = "Trickcal",
+  subreddit = "cats",
   title,
   link = DEFAULT_RECOMMEND_LINK,
+  language = "en"
 } = {}) {
   if (!llm) {
     throw new Error("createCommentRecommendingLink: OPENAI_API_KEY is required");
@@ -47,12 +56,14 @@ async function createCommentRecommendingLink({
     throw new Error("createCommentRecommendingLink: title is required");
   }
 
+  const languageName = getLanguagePromptName(language);
+
   const result = await llm.askJSON({
     model: MODEL,
     developer: [
       "너는 레딧의 일반 유저이다.",
       "반드시 JSON 스키마만 지킨다.",
-      "comment 값은 영어로 작성한다.",
+      `comment 값은 반드시 ${languageName}로 작성한다.`,
       "comment는 자연스러운 Reddit 댓글처럼 작성한다.",
       "comment에는 반드시 제공된 링크를 1회 포함한다.",
       "게시글 제목과 링크 추천 내용을 자연스럽게 연결한다.",
@@ -64,6 +75,7 @@ async function createCommentRecommendingLink({
       `Subreddit: ${subreddit}`,
       `Post title: ${title}`,
       `Recommended link: ${link}`,
+      `Comment language: ${languageName}`,
     ].join("\n"),
     schema,
   });
