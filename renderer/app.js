@@ -26,6 +26,7 @@ const state = {
       commentCount: 1,
       recommendLink: "http://monio.co.kr/",
       commentLanguage: "en",  // ko: 한국어 / zh: 중국어 / ja: 일본어 / en: 영어
+      userDataDirMode: "persistent",
     },
 
     thread: {
@@ -35,6 +36,7 @@ const state = {
       commentText: "",
       searchOption: "default",   // default | recent
       exploreMinutes: 10,
+      userDataDirMode: "persistent",
     },
   },
 };
@@ -83,6 +85,29 @@ function getRedditCommentLanguageLabel(value) {
   if (value === "zh") return "중국어";
   if (value === "ja") return "일본어";
   return "영어";
+}
+
+function normalizeUserDataDirMode(mode) {
+  /**
+   * persistent:
+   *  - 기존 로그인 유지
+   *
+   * temp:
+   *  - 새 로그인 1회
+   *
+   * promote:
+   *  - 새 로그인 후 유지
+   */
+  if (mode === "temp") return "temp";
+  if (mode === "promote") return "promote";
+  return "persistent";
+}
+
+function getUserDataDirModeLabel(mode) {
+  const normalizedMode = normalizeUserDataDirMode(mode);
+  if (normalizedMode === "persistent") return "로그인 유지";
+  if (normalizedMode === "promote") return "새 로그인 후 유지";
+  return "새 로그인";
 }
 
 function pushUiLog(key, level, message) {
@@ -195,7 +220,24 @@ function renderBotConfig() {
           value="${escapeHtml(state.config.reddit.recommendLink)}"
         />
       </div>
+
+      <div class="bot-config-row">
+        <label for="reddit-user-data-dir-mode">로그인 방식</label>
+        <select id="reddit-user-data-dir-mode" class="select">
+          <option value="persistent" ${state.config.reddit.userDataDirMode === "persistent" ? "selected" : ""}>
+            로그인 유지
+          </option>
+          <option value="temp" ${state.config.reddit.userDataDirMode === "temp" ? "selected" : ""}>
+            새 로그인 1회
+          </option>
+          <option value="promote" ${state.config.reddit.userDataDirMode === "promote" ? "selected" : ""}>
+            새 로그인 후 유지
+          </option>
+        </select>
+      </div>
+
     </div>
+
 
     <div id="thread-config" class="${state.config.target !== "thread" ? "hidden" : ""}">
       <div class="bot-config-row">
@@ -247,9 +289,25 @@ function renderBotConfig() {
       <div class="bot-config-row">
         <label for="thread-comment-text">댓글 내용</label>
         <textarea id="thread-comment-text" placeholder="댓글 텍스트...">${escapeHtml(
-    state.config.thread.commentText,
-  )}</textarea>
+          state.config.thread.commentText,
+        )}</textarea>
       </div>
+
+      <div class="bot-config-row">
+        <label for="thread-user-data-dir-mode">로그인 방식</label>
+        <select id="thread-user-data-dir-mode" class="select">
+          <option value="persistent" ${state.config.thread.userDataDirMode === "persistent" ? "selected" : ""}>
+            로그인 유지
+          </option>
+          <option value="temp" ${state.config.thread.userDataDirMode === "temp" ? "selected" : ""}>
+            새 로그인 1회
+          </option>
+          <option value="promote" ${state.config.thread.userDataDirMode === "promote" ? "selected" : ""}>
+            새 로그인 후 유지
+          </option>
+        </select>
+      </div>
+
     </div>
   `;
 }
@@ -279,6 +337,8 @@ function updateBotConfigUI() {
     const commentCount = document.getElementById("reddit-comment-count");
     const commentLanguage = document.getElementById("reddit-comment-language");
     const recommendLink = document.getElementById("reddit-recommend-link");
+    const loginKeepToggle = document.getElementById("reddit-login-keep-toggle");
+    const redditUserDataDirMode = document.getElementById("reddit-user-data-dir-mode");
 
     if (dateRange) dateRange.value = state.config.reddit.dateRange;
     if (subreddit) subreddit.value = state.config.reddit.subreddit;
@@ -286,6 +346,8 @@ function updateBotConfigUI() {
     if (commentCount) commentCount.value = state.config.reddit.commentCount;
     if (commentLanguage) commentLanguage.value = state.config.reddit.commentLanguage;
     if (recommendLink) recommendLink.value = state.config.reddit.recommendLink;
+    if (loginKeepToggle) { loginKeepToggle.checked = state.config.reddit.userDataDirMode === "persistent"; }
+    if (redditUserDataDirMode) { redditUserDataDirMode.value = normalizeUserDataDirMode(state.config.reddit.userDataDirMode); }
   }
 
   if (threadConfig) {
@@ -297,6 +359,8 @@ function updateBotConfigUI() {
     const commentCount = document.getElementById("thread-comment-count");
     const exploreMinutes = document.getElementById("thread-explore-minutes");
     const commentText = document.getElementById("thread-comment-text");
+    const loginKeepToggle = document.getElementById("thread-login-keep-toggle");
+    const threadUserDataDirMode = document.getElementById("thread-user-data-dir-mode");
 
     if (dateRange) dateRange.value = state.config.thread.dateRange;
     if (keyword) keyword.value = state.config.thread.keyword;
@@ -304,6 +368,8 @@ function updateBotConfigUI() {
     if (commentCount) commentCount.value = state.config.thread.commentCount;
     if (exploreMinutes) exploreMinutes.value = state.config.thread.exploreMinutes;
     if (commentText) commentText.value = state.config.thread.commentText;
+    if (loginKeepToggle) { loginKeepToggle.checked = state.config.thread.userDataDirMode === "persistent"; }
+    if (threadUserDataDirMode) { threadUserDataDirMode.value = normalizeUserDataDirMode(state.config.thread.userDataDirMode); }
   }
 }
 
@@ -356,6 +422,17 @@ function handleBotConfigInput(event) {
     return;
   }
 
+  if (id === "reddit-login-keep-toggle") {
+    state.config.reddit.userDataDirMode = event.target.checked ? "persistent" : "temp";
+    renderBotConfig();
+    return;
+  }
+
+  if (id === "reddit-user-data-dir-mode") {
+    state.config.reddit.userDataDirMode = normalizeUserDataDirMode(value);
+    return;
+  }
+
   /** --------------------------------------------------------------------------
    * 3) thread 설정
    * ----------------------------------------------------------------------- */
@@ -386,6 +463,11 @@ function handleBotConfigInput(event) {
 
   if (id === "thread-comment-text") {
     state.config.thread.commentText = value;
+  }
+
+  if (id === "thread-user-data-dir-mode") {
+    state.config.thread.userDataDirMode = normalizeUserDataDirMode(value);
+    return;
   }
 }
 
@@ -553,11 +635,17 @@ function buildStartOptions(key) {
   };
 
   if (key === "reddit") {
+    options.userDataDirMode = normalizeUserDataDirMode(
+      state.config.reddit.userDataDirMode,
+    );
     options.redditConfig = { ...state.config.reddit };
     return options;
   }
 
   if (key === "thread") {
+    options.userDataDirMode = normalizeUserDataDirMode(
+      state.config.thread.userDataDirMode,
+    );
     options.threadConfig = {
       ...state.config.thread,
     };
@@ -661,11 +749,10 @@ function renderHistory(history = []) {
           <div class="meta">
             <div>조건: ${meta.length ? meta.join(" / ") : "-"}</div>
             <div>
-              ${
-                target === "reddit"
-                  ? `추천 링크: ${escapeHtml(config.recommendLink || "(없음)")}`
-                  : `댓글 내용: ${escapeHtml(config.commentText || "(없음)")}`
-              }
+              ${target === "reddit"
+          ? `추천 링크: ${escapeHtml(config.recommendLink || "(없음)")}`
+          : `댓글 내용: ${escapeHtml(config.commentText || "(없음)")}`
+        }
             </div>
           </div>
 

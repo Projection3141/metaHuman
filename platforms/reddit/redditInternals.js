@@ -184,7 +184,7 @@ async function clickSubmitPostButton(page, timeout = 30000) {
 
       return { ok: true, reason: "CLICKED" };
     },
-    { tag: "reddit.clickSubmitPostButton" });
+      { tag: "reddit.clickSubmitPostButton" });
 
     if (res?.ok) {
       console.log("[reddit][post] submit clicked");
@@ -268,7 +268,7 @@ async function clickCommentsActionButton(page, timeout = 15000) {
         text: (btn.textContent || "").trim(),
       };
     },
-    { tag: "reddit.clickCommentsActionButton" });
+      { tag: "reddit.clickCommentsActionButton" });
 
     console.log("[reddit][comment] clickCommentsActionButton result:", res);
 
@@ -307,7 +307,7 @@ async function scrollToCommentsArea(page, { rounds = 8, step = 900 } = {}) {
 
       return false;
     },
-    { tag: "reddit.scrollToCommentsArea.find" });
+      { tag: "reddit.scrollToCommentsArea.find" });
 
     // eslint-disable-next-line no-await-in-loop
     await sleep(350);
@@ -363,13 +363,60 @@ async function focusCommentEditorDeepStrict(page, { timeout = 25000 } = {}) {
         const ariaPh = (el.getAttribute?.("aria-placeholder") || "").trim();
         const ariaLabel = (el.getAttribute?.("aria-label") || "").trim();
 
-        return (
-          ariaPh.includes("대화에 참여") ||
-          ariaPh.includes("댓글") ||
-          ariaLabel.includes("콘텐츠 작성") ||
-          ariaLabel.includes("댓글") ||
-          ariaLabel.includes("입력")
-        );
+        const editorTextCandidates = [
+          /** Korean */
+          "대화에 참여",
+          "댓글 추가",
+          "댓글 작성",
+          "콘텐츠 작성",
+          "댓글",
+          "입력",
+
+          /** English */
+          "join the conversation",
+          "add a comment",
+          "write a comment",
+          "create content",
+          "comment",
+          "content",
+          "input",
+
+          /** Chinese Simplified / Traditional */
+          "加入对话",
+          "加入對話",
+          "添加评论",
+          "新增留言",
+          "发表评论",
+          "發表評論",
+          "评论",
+          "評論",
+          "留言",
+          "输入",
+          "輸入",
+
+          /** Japanese */
+          "会話に参加",
+          "コメントを追加",
+          "コメントする",
+          "コンテンツを作成",
+          "コメント",
+          "入力",
+        ];
+
+        /**
+         * 영어는 대소문자 영향을 받기 때문에 lower 비교한다.
+         * 한/중/일은 lowerCase 영향이 거의 없어서 그대로 동작한다.
+         */
+        const haystacks = [
+          ariaPh,
+          ariaLabel,
+        ].map((value) => String(value || "").toLowerCase());
+
+        return editorTextCandidates.some((candidate) => {
+          const needle = String(candidate || "").toLowerCase();
+
+          return haystacks.some((haystack) => haystack.includes(needle));
+        });
       };
 
       const hostCandidates = Array.from(
@@ -418,8 +465,8 @@ async function focusCommentEditorDeepStrict(page, { timeout = 25000 } = {}) {
 
         const editors = root.querySelectorAll
           ? root.querySelectorAll(
-              'div[role="textbox"][contenteditable], div[role="textbox"][contenteditable="true"]',
-            )
+            'div[role="textbox"][contenteditable], div[role="textbox"][contenteditable="true"]',
+          )
           : [];
 
         for (const ed of editors) {
@@ -454,7 +501,7 @@ async function focusCommentEditorDeepStrict(page, { timeout = 25000 } = {}) {
 
       return { ok: false, reason: "NO_EDITOR", url: location.href, title: document.title };
     },
-    { tag: "reddit.focusCommentEditorDeepStrict" });
+      { tag: "reddit.focusCommentEditorDeepStrict" });
 
     if (res?.ok) {
       console.log("[reddit][comment] editor focused:", res);
@@ -491,42 +538,136 @@ async function clickCommentSubmitButtonDeep(page, timeout = 20000) {
 
       const pushShadowRoots = (root) => {
         if (!root?.querySelectorAll) return;
+
         const all = root.querySelectorAll("*");
+
         for (const el of all) {
-          if (el && el.shadowRoot) roots.push(el.shadowRoot);
+          if (el && el.shadowRoot) {
+            roots.push(el.shadowRoot);
+          }
         }
       };
 
       const isClickable = (btn) => {
-        const ariaDisabled = (btn.getAttribute?.("aria-disabled") || "").toLowerCase() === "true";
+        const ariaDisabled =
+          (btn.getAttribute?.("aria-disabled") || "").toLowerCase() === "true";
+
         const disabled = !!btn.disabled;
+
         return !(disabled || ariaDisabled);
+      };
+
+      /**
+       * Reddit 댓글 등록 버튼 언어 후보.
+       *
+       * ko:
+       *  - 댓글
+       *  - 댓글 달기
+       *  - 게시
+       *
+       * en:
+       *  - comment
+       *  - post
+       *  - reply
+       *
+       * zh:
+       *  - 评论
+       *  - 評論
+       *  - 发表评论
+       *  - 發表評論
+       *  - 回复
+       *  - 回覆
+       *
+       * ja:
+       *  - コメント
+       *  - 返信
+       *  - 投稿
+       */
+      const submitTextCandidates = [
+        /** Korean */
+        "댓글",
+        "댓글 달기",
+        "게시",
+
+        /** English */
+        "comment",
+        "post",
+        "reply",
+
+        /** Chinese Simplified / Traditional */
+        "评论",
+        "評論",
+        "发表评论",
+        "發表評論",
+        "回复",
+        "回覆",
+
+        /** Japanese */
+        "コメント",
+        "返信",
+        "投稿",
+      ];
+
+      const matchesSubmitText = (value) => {
+        const text = String(value || "")
+          .replace(/\s+/g, " ")
+          .trim()
+          .toLowerCase();
+
+        return submitTextCandidates.some((candidate) =>
+          text.includes(String(candidate).toLowerCase())
+        );
       };
 
       for (let i = 0; i < roots.length; i += 1) {
         const root = roots[i];
+
         if (!root || seen.has(root)) continue;
         seen.add(root);
 
-        const btns = root.querySelectorAll ? Array.from(root.querySelectorAll("button")) : [];
-        const hit = btns.find((b) => (b.textContent || "").trim() === "댓글");
+        const btns = root.querySelectorAll
+          ? Array.from(root.querySelectorAll("button"))
+          : [];
+
+        const hit = btns.find((btn) => {
+          const text = String(btn.textContent || "").trim();
+          const ariaLabel = String(btn.getAttribute?.("aria-label") || "").trim();
+
+          return (
+            matchesSubmitText(text) ||
+            matchesSubmitText(ariaLabel)
+          );
+        });
 
         if (hit && isClickable(hit)) {
           try {
-            hit.scrollIntoView({ block: "center", inline: "center" });
+            hit.scrollIntoView({
+              block: "center",
+              inline: "center",
+            });
           } catch {
             /** ignore */
           }
+
           hit.click();
-          return { ok: true, via: "DEEP_BFS", text: (hit.textContent || "").trim() };
+
+          return {
+            ok: true,
+            via: "DEEP_BFS",
+            text: String(hit.textContent || "").trim(),
+            ariaLabel: String(hit.getAttribute?.("aria-label") || "").trim(),
+          };
         }
 
         pushShadowRoots(root);
       }
 
-      return { ok: false, reason: "NO_SUBMIT" };
+      return {
+        ok: false,
+        reason: "NO_SUBMIT",
+      };
     },
-    { tag: "reddit.clickCommentSubmitButtonDeep" });
+      { tag: "reddit.clickCommentSubmitButtonDeep" });
 
     if (res?.ok) {
       console.log("[reddit][comment] submit clicked:", res);
@@ -537,7 +678,9 @@ async function clickCommentSubmitButtonDeep(page, timeout = 20000) {
     await sleep(250);
   }
 
-  throw new Error("clickCommentSubmitButtonDeep timeout: submit button not found/clickable");
+  throw new Error(
+    "clickCommentSubmitButtonDeep timeout: submit button not found/clickable"
+  );
 }
 
 module.exports = {

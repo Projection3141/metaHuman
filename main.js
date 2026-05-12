@@ -425,6 +425,48 @@ function waitForChildExit(child, timeoutMs = 5000) {
   });
 }
 
+/**
+ * utilityProcess에 graceful stop 메시지를 보낸다.
+ *
+ * 역할:
+ *  - runner가 process.parentPort.on("message")로 stop을 받아
+ *    isStopping = true 처리할 수 있게 한다.
+ *  - 이 함수는 프로세스를 죽이지 않는다.
+ */
+function requestGracefulStop(child) {
+  if (!child) return false;
+
+  let requested = false;
+
+  try {
+    if (typeof child.postMessage === "function") {
+      child.postMessage({
+        type: "stop",
+      });
+
+      requested = true;
+    }
+  } catch {
+    /** ignore */
+  }
+
+  return requested;
+}
+
+/**
+ * Stop 제한 시간 계산
+ *
+ * 역할:
+ *  - promote 모드는 브라우저 종료 + 프로필 복사/이동 시간이 필요하므로 더 길게 기다린다.
+ */
+function getStopTimeoutMs(runtime) {
+  if (runtime?.userDataDirMode === "promote") {
+    return 30000;
+  }
+
+  return 10000;
+}
+
 /** ****************************************************************************
  * Windows / Unix 계열 프로세스 트리 종료
  *
@@ -602,6 +644,22 @@ function attachChildLogStream(key, child) {
   bindStream(child.stderr, "error");
 }
 
+function normalizeUserDataDirMode(mode) {
+  /**
+   * persistent:
+   *  - 기존 로그인 유지
+   *
+   * temp:
+   *  - 새 로그인 1회
+   *
+   * promote:
+   *  - 새 로그인 후 유지
+   */
+  if (mode === "temp") return "temp";
+  if (mode === "promote") return "promote";
+  return "persistent";
+}
+
 /** ****************************************************************************
  * 봇 시작
  *
@@ -637,6 +695,7 @@ async function startBot(key, options = {}) {
     BOT_APP_ROOT: app.getAppPath(),
     BOT_RESOURCES_PATH: process.resourcesPath,
     BOT_APP_NAME: app.getName(),
+    USER_DATA_DIR_MODE: normalizeUserDataDirMode(options.userDataDirMode),
   };
 
   /** ------------------------------------------------------------------------
@@ -686,6 +745,7 @@ async function startBot(key, options = {}) {
   RUNNING.set(key, {
     child,
     requestedStop: false,
+    userDataDirMode: normalizeUserDataDirMode(options.userDataDirMode),
   });
 
   BOT_STATE[key] = {
@@ -706,35 +766,81 @@ async function startBot(key, options = {}) {
   return { ok: true };
 }
 
-/** ****************************************************************************
+/**
  * 봇 중지
  *
  * 핵심:
- *  1) requestedStop 설정
- *  2) stopping 상태 즉시 반영
- *  3) 실제 종료 이벤트까지 기다림
- *  4) timeout이면 강제로 error 처리
- ******************************************************************************/
+ *  1) utilityProcess에 stop 메시지를 보낸다.
+ *  2) runner가 standby loop를 빠져나가 finally를 실행하게 기다린다.
+ *  3) promote 모드는 persistent 프로필 교체 시간이 필요하므로 더 오래 기다린다.
+ *  4) timeout일 때만 taskkill /F를 사용한다.
+ */
 async function stopBot(key) {
   const runtime = RUNNING.get(key);
+
   if (!runtime?.child) {
     return { ok: false, error: `${key} is not running` };
   }
 
   runtime.requestedStop = true;
 
-  /** UI 즉시 반영 */
   BOT_STATE[key] = {
     ...BOT_STATE[key],
     status: "stopping",
   };
+
   sendStatus(key);
 
-  pushLog(key, "system", `[main] stopping ${key}...`);
+  pushLog(
+    key,
+    "system",
+    `[main] graceful stopping ${key} userDataDirMode=${runtime.userDataDirMode || "persistent"}`,
+  );
+
+  /**
+   * 1) utilityProcess에 정상 종료 요청.
+   *    여기서는 절대 taskkill /F를 먼저 쓰면 안 된다.
+   */
+  const requested = requestGracefulStop(runtime.child);
+
+  if (!requested) {
+    pushLog(key, "error", "[main] graceful stop message failed");
+  }
+
+  /**
+   * 2) runner의 finally가 끝나고 exit 이벤트가 올 때까지 기다린다.
+   */
+  const timeoutMs = getStopTimeoutMs(runtime);
+  const exitInfo = await waitForChildExit(runtime.child, timeoutMs);
+
+  if (!exitInfo.timedOut) {
+    pushLog(
+      key,
+      "system",
+      `[main] graceful stop completed event=${exitInfo.event || "exit"} code=${
+        Number.isInteger(exitInfo.code) ? exitInfo.code : "unknown"
+      }`,
+    );
+
+    return {
+      ok: true,
+      graceful: true,
+      ...exitInfo,
+    };
+  }
+
+  /**
+   * 3) 여기까지 왔다는 건 runner가 정상 종료하지 못했다는 뜻.
+   *    이때만 강제 종료한다.
+   */
+  pushLog(
+    key,
+    "error",
+    `[main] graceful stop timeout after ${timeoutMs}ms, force killing ${key}`,
+  );
 
   const result = await killProcessTree(runtime.child, 5000);
 
-  /** 종료 이벤트가 끝내 안 오면 여기서 정리 */
   if (!result.ok) {
     BOT_STATE[key] = {
       ...BOT_STATE[key],
@@ -744,13 +850,20 @@ async function stopBot(key) {
     };
 
     sendStatus(key);
-    pushLog(key, "error", `[main] stop timeout for ${key}`);
+    pushLog(key, "error", `[main] force stop timeout for ${key}`);
     RUNNING.delete(key);
 
-    return { ok: false, error: "Process stop timeout" };
+    return {
+      ok: false,
+      error: "Process stop timeout",
+    };
   }
 
-  return { ok: true };
+  return {
+    ok: true,
+    graceful: false,
+    forceKilled: true,
+  };
 }
 
 /** ****************************************************************************

@@ -24,7 +24,7 @@ const {
   commentOnSearchResults,
 } = require("./redditBot");
 
-const { closeAll } = require("../../core/browserEngine");
+const { closeAll, armProfilePromotion, finalizeProfilePromotion, } = require("../../core/browserEngine");
 const { sleep } = require("../../core/helpers");
 const { createCommentRecommendingLink } = require("../../llm/runLlm");
 
@@ -53,6 +53,22 @@ function readEnvBool(name, fallback = false) {
   if (raw === "1" || raw.toLowerCase() === "true") return true;
   if (raw === "0" || raw.toLowerCase() === "false") return false;
   return fallback;
+}
+
+function normalizeUserDataDirMode(mode) {
+  /**
+   * persistent:
+   *  - 기존 로그인 유지
+   *
+   * temp:
+   *  - 새 로그인 1회
+   *
+   * promote:
+   *  - 새 로그인 후 유지
+   */
+  if (mode === "temp") return "temp";
+  if (mode === "promote") return "promote";
+  return "persistent";
 }
 
 /** ****************************************************************************
@@ -128,6 +144,10 @@ const REDDIT_RECOMMEND_LINK = readEnvString(
 
 const HEADLESS = readEnvBool("BOT_HEADLESS", false);
 
+const USER_DATA_DIR_MODE = normalizeUserDataDirMode(
+  readEnvString("USER_DATA_DIR_MODE", "persistent").trim(),
+);
+
 /** 로그인 완료 대기 최대 시간 */
 const LOGIN_WAIT_TIMEOUT_MS = readEnvNumber("BOT_LOGIN_WAIT_TIMEOUT_MS", 10 * 60 * 1000);
 
@@ -154,6 +174,7 @@ function getRunSummary() {
   return {
     userDataRoot: USER_DATA_ROOT,
     headless: HEADLESS,
+    userDataDirMode: USER_DATA_DIR_MODE,
     manualLogin: true,
     loginWaitTimeoutMs: LOGIN_WAIT_TIMEOUT_MS,
     standbyPollMs: STANDBY_POLL_MS,
@@ -180,6 +201,12 @@ function bindShutdownSignals() {
   if (signalsBound) return;
   signalsBound = true;
 
+  /**
+   * 일반 signal 종료 대응.
+   *
+   * 역할:
+   *  - 직접 node 실행 또는 POSIX SIGTERM 상황에서 standby loop를 종료한다.
+   */
   const onStop = (signal) => {
     console.log(`[runReddit] stop signal received: ${signal}`);
     isStopping = true;
@@ -187,6 +214,45 @@ function bindShutdownSignals() {
 
   process.on("SIGINT", onStop);
   process.on("SIGTERM", onStop);
+  /**
+   * Electron utilityProcess stop 메시지 대응.
+   *
+   * 중요:
+   *  - main.js가 utilityProcess.fork()를 사용하므로,
+   *    stop 시 child.postMessage({ type: "stop" })를 받을 수 있어야 한다.
+   *  - 이 메시지를 받아야 waitForStandby()가 빠져나가고 finally가 실행된다.
+   */
+  try {
+    if (process.parentPort) {
+      process.parentPort.on("message", (event) => {
+        const message = event?.data || event;
+
+        if (message?.type === "stop") {
+          console.log("[runReddit] stop message received");
+          isStopping = true;
+        }
+      });
+    }
+  } catch {
+    /** ignore */
+  }
+
+  /**
+   * child_process.fork 호환용.
+   *
+   * 역할:
+   *  - 나중에 utilityProcess 대신 child_process.fork로 돌려도 동일하게 stop 처리한다.
+   */
+  try {
+    process.on("message", (message) => {
+      if (message?.type === "stop") {
+        console.log("[runReddit] stop message received");
+        isStopping = true;
+      }
+    });
+  } catch {
+    /** ignore */
+  }
 }
 
 /** ****************************************************************************
@@ -213,16 +279,17 @@ async function runReddit() {
 
   let page = null;
   let runResult = null;
+  let opened = null;
 
   try {
     /** ------------------------------------------------------------------------
      * 1) 사이트 진입
      * ---------------------------------------------------------------------- */
-    const opened = await enterSite({
+    opened = await enterSite({
       headless: HEADLESS,
       storageKey: "reddit_main",
       localeProfileKey: "kr",
-      useTempProfile: false,
+      userDataDirMode: USER_DATA_DIR_MODE,
     });
 
     page = opened?.page;
@@ -241,6 +308,10 @@ async function runReddit() {
       timeout: LOGIN_WAIT_TIMEOUT_MS,
     });
     console.log("[runReddit] login detected");
+
+    if (USER_DATA_DIR_MODE === "promote") {
+      armProfilePromotion(opened.browser);
+    }
 
     appendHistory({
       action: "manualLoginWait",
@@ -351,9 +422,25 @@ async function runReddit() {
 
     throw err;
   } finally {
-    /** ------------------------------------------------------------------------
-     * 6) 종료 신호가 왔거나 예외로 빠질 때만 브라우저 정리
-     * ---------------------------------------------------------------------- */
+    /**
+   * promote 모드에서는 closeAll보다 먼저 명시적으로 프로필 승격을 처리한다.
+   * 그래야 브라우저 종료 후 userDataDir 파일 lock이 풀린 다음 persistent로 교체된다.
+   */
+    if (USER_DATA_DIR_MODE === "promote") {
+      try {
+        const promoted = await finalizeProfilePromotion(opened?.browser);
+
+        console.log("[runReddit] profile promotion finalized", {
+          promoted,
+          storageKey: "reddit_main",
+        });
+      } catch (promoteErr) {
+        console.error(
+          "[runReddit] profile promotion failed:",
+          promoteErr?.message || promoteErr,
+        );
+      }
+    }
     await closeAll().catch((closeErr) => {
       console.error("[runReddit] closeAll failed:", closeErr?.message || closeErr);
     });

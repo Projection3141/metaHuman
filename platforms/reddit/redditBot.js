@@ -54,7 +54,7 @@ const {
  * @param {string} options.localeProfileKey - 로케일 프로필 키
  * @param {boolean} options.headless - 헤드리스 모드
  * @param {Object} options.viewport - 뷰포트 설정
- * @param {boolean} options.useTempProfile - 임시 프로필 사용 여부
+ * @param {string} options.userDataDirMode - 사용자 데이터 디렉토리 모드
  * @returns {Promise<Object>} 페이지 객체를 포함한 결과
  * 로직: browserEngine.openPage를 호출하여 Reddit 페이지 열기, 임시 프로필 사용으로 detached frame 이슈 방지
  */
@@ -64,7 +64,7 @@ async function enterSite({
   localeProfileKey = "kr",
   headless = false,
   viewport = { width: 1280, height: 900 },
-  useTempProfile = false, // true : 항상 임시 프로필 사용 / false : 기존 프로필 사용
+  userDataDirMode = "persistent", // "temp" or "persistent"
 } = {}) {
   return openPage({
     url: targetUrl,
@@ -72,7 +72,7 @@ async function enterSite({
     localeProfileKey,
     headless,
     viewport,
-    userDataDirMode: useTempProfile ? "temp" : "persistent",
+    userDataDirMode: normalizeUserDataDirMode(userDataDirMode),
     useMobile: false,
     tag: "reddit.page",
     launchArgs: [
@@ -80,6 +80,22 @@ async function enterSite({
       "--disable-setuid-sandbox"
     ]
   });
+}
+
+function normalizeUserDataDirMode(mode) {
+  /**
+   * persistent:
+   *  - 기존 로그인 유지
+   *
+   * temp:
+   *  - 새 로그인 1회
+   *
+   * promote:
+   *  - 새 로그인 후 유지
+   */
+  if (mode === "temp") return "temp";
+  if (mode === "promote") return "promote";
+  return "persistent";
 }
 
 /** ****************************************************************************

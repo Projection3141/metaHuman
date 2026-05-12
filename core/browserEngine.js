@@ -143,6 +143,7 @@ loadProfiles();
 const MAX_BROWSERS = 4;
 const BROWSER_CACHE = new Map();
 const TEMP_BROWSERS = new Set();
+const PROFILE_PROMOTIONS = new WeakMap();
 
 /** ****************************************************************************
  * 기본값
@@ -189,11 +190,86 @@ function getProfilesBaseDir() {
   return base;
 }
 
+function getSafeStorageKey(storageKey = "default") {
+  /**
+   * 폴더명으로 안전하게 사용할 수 있게 정리한다.
+   */
+  return String(storageKey).replace(/[^\w\-]+/g, "_");
+}
+
+function normalizeUserDataDirMode(mode) {
+  /**
+   * persistent:
+   *  - 기존 로그인 유지
+   *
+   * temp:
+   *  - 새 로그인 1회 사용
+   *
+   * promote:
+   *  - 새 로그인 후 persistent로 저장
+   */
+  if (mode === "temp") return "temp";
+  if (mode === "promote") return "promote";
+  return "persistent";
+}
+
+function getPersistentUserDataDir(storageKey = "default") {
+  const base = getProfilesBaseDir();
+  const safeKey = getSafeStorageKey(storageKey);
+  return path.join(base, safeKey);
+}
+
+function getPromoteUserDataDir(storageKey = "default") {
+  const base = getProfilesBaseDir();
+  const safeKey = getSafeStorageKey(storageKey);
+  return path.join(base, `${safeKey}__promote`);
+}
+
+function waitMs(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function removeDirSafe(dir) {
+  try {
+    fs.rmSync(dir, {
+      recursive: true,
+      force: true,
+      maxRetries: 5,
+      retryDelay: 200,
+    });
+  } catch {
+    /** ignore */
+  }
+}
+
+function moveDirSafe(sourceDir, targetDir) {
+  /**
+   * 기존 persistent 프로필을 삭제하고 promote 프로필을 이동한다.
+   */
+  removeDirSafe(targetDir);
+
+  try {
+    fs.renameSync(sourceDir, targetDir);
+    return;
+  } catch {
+    /**
+     * Windows에서 rename이 실패하는 경우를 대비한 fallback.
+     */
+    fs.cpSync(sourceDir, targetDir, {
+      recursive: true,
+      force: true,
+    });
+
+    removeDirSafe(sourceDir);
+  }
+}
+
 function resolveUserDataDir(storageKey = "default", mode = "persistent") {
+  const normalizedMode = normalizeUserDataDirMode(mode);
   const base = getProfilesBaseDir();
   const safeKey = String(storageKey).replace(/[^\w\-]+/g, "_");
 
-  if (mode === "temp") {
+  if (normalizedMode === "temp") {
     const dir = path.join(
       base,
       `${safeKey}__tmp__${Date.now()}__${Math.random().toString(16).slice(2)}`
@@ -202,7 +278,21 @@ function resolveUserDataDir(storageKey = "default", mode = "persistent") {
     return dir;
   }
 
-  const dir = path.join(base, safeKey);
+  if (normalizedMode === "promote") {
+    const dir = getPromoteUserDataDir(storageKey);
+
+    removeDirSafe(dir);
+    ensureDir(dir);
+
+    return dir;
+  }
+
+  /**
+   * 기존 로그인 유지:
+   * - storageKey 기준 고정 프로필 사용
+   */
+  const dir = getPersistentUserDataDir(storageKey);
+
   ensureDir(dir);
   return dir;
 }
@@ -292,11 +382,28 @@ async function enforceMaxBrowsers() {
 /** ****************************************************************************
  * browser disconnect 정리
  ******************************************************************************/
-function attachBrowserDisconnectCleanup(browser, { storageKey, isTemp = false } = {}) {
+function attachBrowserDisconnectCleanup(
+  browser,
+  {
+    storageKey,
+    isTemp = false,
+    isPromote = false,
+  } = {},
+) {
   if (!browser || typeof browser.on !== "function") return;
 
   browser.on("disconnected", () => {
     try {
+      if (isPromote) {
+        TEMP_BROWSERS.delete(browser);
+
+        console.log("[browserEngine] promote browser disconnected", {
+          storageKey,
+        });
+
+        return;
+      }
+
       if (isTemp) {
         TEMP_BROWSERS.delete(browser);
         return;
@@ -306,8 +413,11 @@ function attachBrowserDisconnectCleanup(browser, { storageKey, isTemp = false } 
       if (entry?.browser === browser) {
         BROWSER_CACHE.delete(storageKey);
       }
-    } catch {
-      /** ignore */
+    } catch (error) {
+      console.log("[browserEngine] disconnect cleanup failed", {
+        storageKey,
+        message: error?.message || String(error),
+      });
     }
   });
 }
@@ -325,11 +435,13 @@ async function getBrowser(opts = {}) {
     headless = d.headless,
     width = d.width,
     height = d.height,
-    userDataDirMode = "persistent",
+    userDataDirMode = "persistent", // "persistent" or "temp"
     launchArgs = [],
   } = opts;
 
-  if (userDataDirMode === "persistent") {
+  const normalizedUserDataDirMode = normalizeUserDataDirMode(userDataDirMode);
+
+  if (normalizedUserDataDirMode === "persistent") {
     const cached = BROWSER_CACHE.get(storageKey);
 
     if (cached?.browser?.isConnected?.()) {
@@ -340,6 +452,7 @@ async function getBrowser(opts = {}) {
         storageKey,
         localeProfile,
         isTemp: false,
+        isPromote: false,
       };
     }
 
@@ -348,7 +461,7 @@ async function getBrowser(opts = {}) {
     }
   }
 
-  const userDataDir = resolveUserDataDir(storageKey, userDataDirMode);
+  const userDataDir = resolveUserDataDir(storageKey, normalizedUserDataDirMode);
 
   const args = baseChromeArgs({
     width,
@@ -366,7 +479,7 @@ async function getBrowser(opts = {}) {
     defaultViewport: d.ui?.defaultViewportNull ? null : { width, height },
   });
 
-  if (userDataDirMode === "persistent") {
+  if (normalizedUserDataDirMode === "persistent") {
     BROWSER_CACHE.set(storageKey, {
       browser,
       userDataDir,
@@ -377,15 +490,27 @@ async function getBrowser(opts = {}) {
     attachBrowserDisconnectCleanup(browser, {
       storageKey,
       isTemp: false,
+      isPromote: false,
+      userDataDir,
     });
 
     await enforceMaxBrowsers();
   } else {
     TEMP_BROWSERS.add(browser);
 
+    if (normalizedUserDataDirMode === "promote") {
+      PROFILE_PROMOTIONS.set(browser, {
+        storageKey,
+        userDataDir,
+        armed: false,
+      });
+    }
+
     attachBrowserDisconnectCleanup(browser, {
       storageKey,
-      isTemp: true,
+      isTemp: normalizedUserDataDirMode === "temp",
+      isPromote: normalizedUserDataDirMode === "promote",
+      userDataDir,
     });
   }
 
@@ -394,7 +519,8 @@ async function getBrowser(opts = {}) {
     userDataDir,
     storageKey,
     localeProfile,
-    isTemp: userDataDirMode === "temp",
+    isTemp: normalizedUserDataDirMode === "temp",
+    isPromote: normalizedUserDataDirMode === "promote",
   };
 }
 
@@ -423,7 +549,7 @@ async function openPage(opts = {}) {
 
   if (!url) throw new Error("openPage: url is required");
 
-  const { browser, userDataDir, localeProfile, isTemp } = await getBrowser({
+  const { browser, userDataDir, localeProfile, isTemp, isPromote } = await getBrowser({
     storageKey,
     localeProfileKey,
     headless,
@@ -467,6 +593,7 @@ async function openPage(opts = {}) {
     storageKey,
     localeProfileKey: localeProfileKey || PROFILE_STORE.defaultKey,
     isTemp,
+    isPromote,
   };
 }
 
@@ -479,6 +606,118 @@ async function closeProfile(storageKey) {
   try {
     await entry.browser.close();
   } catch { }
+}
+
+function armProfilePromotion(browser) {
+  /**
+   * promote 모드 브라우저만 저장 대상으로 표시한다.
+   * 로그인 성공이 확인된 뒤에만 호출해야 한다.
+   */
+  const promotion = PROFILE_PROMOTIONS.get(browser);
+
+  if (!promotion) {
+    return false;
+  }
+
+  promotion.armed = true;
+  PROFILE_PROMOTIONS.set(browser, promotion);
+
+  console.log("[browserEngine] profile promotion armed", {
+    storageKey: promotion.storageKey,
+    userDataDir: promotion.userDataDir,
+  });
+
+  return true;
+}
+
+/**
+ * promote 프로필을 persistent 프로필로 확정 저장한다.
+ *
+ * 역할:
+ *  - "새 로그인 후 유지" 모드에서 로그인 성공한 프로필을 기존 로그인 유지 프로필로 교체한다.
+ *
+ * 중요:
+ *  - 반드시 browser.close() 이후에 폴더를 이동한다.
+ *  - Windows에서는 Chrome 종료 직후 파일 lock이 늦게 풀릴 수 있으므로 짧게 대기한다.
+ */
+async function finalizeProfilePromotion(browser) {
+  if (!browser) {
+    return false;
+  }
+
+  const promotion = PROFILE_PROMOTIONS.get(browser);
+
+  /**
+   * promote 대상 브라우저가 아니면 아무것도 하지 않는다.
+   */
+  if (!promotion) {
+    return false;
+  }
+
+  /**
+   * 로그인 성공 전에 종료된 경우 기존 persistent 계정을 유지한다.
+   */
+  if (!promotion.armed) {
+    PROFILE_PROMOTIONS.delete(browser);
+    TEMP_BROWSERS.delete(browser);
+
+    try {
+      if (browser.isConnected?.()) {
+        await browser.close();
+      }
+    } catch {
+      /** ignore */
+    }
+
+    removeDirSafe(promotion.userDataDir);
+
+    console.log("[browserEngine][profilePromotion] 로그인 성공 전 종료되어 새 로그인 프로필 폐기", {
+      storageKey: promotion.storageKey,
+      userDataDir: promotion.userDataDir,
+    });
+
+    return false;
+  }
+
+  const { storageKey, userDataDir } = promotion;
+  const persistentDir = getPersistentUserDataDir(storageKey);
+
+  PROFILE_PROMOTIONS.delete(browser);
+  TEMP_BROWSERS.delete(browser);
+
+  /**
+   * 같은 storageKey의 persistent 브라우저가 캐시에 있으면 먼저 닫는다.
+   */
+  await closeProfile(storageKey);
+
+  /**
+   * promote 브라우저를 명시적으로 닫는다.
+   */
+  try {
+    if (browser.isConnected?.()) {
+      await browser.close();
+    }
+  } catch {
+    /** ignore */
+  }
+
+  /**
+   * Chrome 프로필 파일 lock 해제 대기.
+   */
+  await waitMs(1000);
+
+  /**
+   * promote 프로필을 persistent 프로필로 교체한다.
+   */
+  moveDirSafe(userDataDir, persistentDir);
+
+  console.log("[browserEngine][profilePromotion] 로그인 유지 계정이 새 로그인 계정으로 변경됨", {
+    storageKey,
+    from: userDataDir,
+    to: persistentDir,
+  });
+
+  return true;
 }
 
 async function closeAll() {
@@ -502,4 +741,6 @@ module.exports = {
   openPage,
   closeProfile,
   closeAll,
+  armProfilePromotion,
+  finalizeProfilePromotion,
 };
