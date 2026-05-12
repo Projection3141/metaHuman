@@ -50,19 +50,19 @@ async function enterSite({
 }
 
 function normalizeUserDataDirMode(mode) {
-  /**
-   * persistent:
-   *  - 기존 로그인 유지
-   *
-   * temp:
-   *  - 새 로그인 1회
-   *
-   * promote:
-   *  - 새 로그인 후 유지
-   */
-  if (mode === "temp") return "temp";
-  if (mode === "promote") return "promote";
-  return "persistent";
+    /**
+     * persistent:
+     *  - 기존 로그인 유지
+     *
+     * temp:
+     *  - 새 로그인 1회
+     *
+     * promote:
+     *  - 새 로그인 후 유지
+     */
+    if (mode === "temp") return "temp";
+    if (mode === "promote") return "promote";
+    return "persistent";
 }
 
 /** ****************************************************************************
@@ -143,14 +143,17 @@ async function commentOnSearchResults(
         dateRange,
         count = 1,
         commentText,
+        createCommentText,
         searchOption = "default",
         exploreMinutes = 10,
     } = {},
 ) {
     if (!page) throw new Error("commentOnSearchResults: page is required");
     if (!keyword) throw new Error("commentOnSearchResults: keyword is required");
-    if (!commentText) throw new Error("commentOnSearchResults: commentText is required");
-    if (!count || count <= 0) return { page, urls: [] };
+    if (!commentText && typeof createCommentText !== "function") {
+        throw new Error("commentOnSearchResults: commentText or createCommentText is required");
+    }
+    if (!count || count <= 0) return { page, urls: [], posts: [], };
 
     const searchUrl = buildThreadSearchUrl({ keyword, searchOption });
     const range = parseDateRange(dateRange);
@@ -159,6 +162,7 @@ async function commentOnSearchResults(
 
     const seenUrls = new Set();
     const commentedUrls = [];
+    const posted = [];
     let stagnantRounds = 0;
 
     console.log(
@@ -222,13 +226,43 @@ async function commentOnSearchResults(
             if (commentedUrls.length >= targetCount) break;
 
             try {
+                /**
+                 * 1) createCommentText가 있으면 게시글 텍스트 기반으로 LLM 댓글 생성
+                 * 2) 없으면 기존 commentText 사용
+                 */
+                const nextCommentText = typeof createCommentText === "function"
+                    ? await createCommentText({
+                        keyword,
+                        dateRange,
+                        post: item,
+                    })
+                    : commentText;
+
+                if (!nextCommentText) {
+                    console.log(`[thread][comment] skipped empty generated comment url=${item.postUrl}`);
+                    seenUrls.add(item.postUrl);
+                    continue;
+                }
+
+                console.log(
+                    `[thread][comment] generated url=${item.postUrl} comment=${String(nextCommentText).replace(/\s+/g, " ").slice(0, 160)}`
+                );
+
                 console.log(`[thread][comment] posting to ${item.postUrl}`);
+
                 await commentOnThreadFeedItem(page, {
                     postUrl: item.postUrl,
-                    commentText,
+                    commentText: nextCommentText,
                 });
 
                 commentedUrls.push(item.postUrl);
+                posted.push({
+                    url: item.postUrl,
+                    datetime: item.datetime,
+                    postText: item.postText,
+                    commentText: nextCommentText,
+                });
+
                 seenUrls.add(item.postUrl);
                 commentedInThisRound += 1;
 
@@ -281,7 +315,8 @@ async function commentOnSearchResults(
 
     return {
         page,
-        urls: commentedUrls,
+        urls: posted.map((item) => item.url),
+        posts: posted,
     };
 }
 

@@ -39,7 +39,7 @@
  * =============================================================================
  */
 
-require("dotenv").config(); 
+require("dotenv").config();
 
 const fs = require("fs");
 const path = require("path");
@@ -392,12 +392,12 @@ function waitForChildExit(child, timeoutMs = 5000) {
     function cleanup() {
       clearTimeout(timer);
 
-      try { child.off?.("exit", onExit); } catch {}
-      try { child.off?.("error", onError); } catch {}
+      try { child.off?.("exit", onExit); } catch { }
+      try { child.off?.("error", onError); } catch { }
 
       /** EventEmitter 호환성 */
-      try { child.removeListener?.("exit", onExit); } catch {}
-      try { child.removeListener?.("error", onError); } catch {}
+      try { child.removeListener?.("exit", onExit); } catch { }
+      try { child.removeListener?.("error", onError); } catch { }
     }
 
     /** utilityProcess / child_process 공통 */
@@ -420,8 +420,8 @@ function waitForChildExit(child, timeoutMs = 5000) {
       done({ code: null, signal: null, timedOut: true, event: "timeout" });
     }, timeoutMs);
 
-    try { child.once?.("exit", onExit); } catch {}
-    try { child.once?.("error", onError); } catch {}
+    try { child.once?.("exit", onExit); } catch { }
+    try { child.once?.("error", onError); } catch { }
   });
 }
 
@@ -724,15 +724,16 @@ async function startBot(key, options = {}) {
 
     if (cfg.keyword) env.THREAD_TARGET_KEYWORD = cfg.keyword;
     if (cfg.dateRange) env.THREAD_TARGET_DATE_RANGE = cfg.dateRange;
-    if (cfg.commentText) env.THREAD_TARGET_COMMENT_TEXT = cfg.commentText;
     if (cfg.searchOption) env.THREAD_SEARCH_OPTION = cfg.searchOption;
+    if (cfg.recommendLink) env.THREAD_RECOMMEND_LINK = cfg.recommendLink;
+    if (cfg.commentLanguage) env.THREAD_COMMENT_LANGUAGE = cfg.commentLanguage;
 
     if (typeof cfg.commentCount !== "undefined") {
       env.THREAD_TARGET_COMMENT_COUNT = String(cfg.commentCount);
     }
 
     if (typeof cfg.exploreMinutes !== "undefined") {
-      env.THREAD_TARGET_EXPLORE_MINUTES = String(cfg.exploreMinutes);
+      env.THREAD_EXPLORE_MINUTES = String(cfg.exploreMinutes);
     }
   }
 
@@ -817,8 +818,7 @@ async function stopBot(key) {
     pushLog(
       key,
       "system",
-      `[main] graceful stop completed event=${exitInfo.event || "exit"} code=${
-        Number.isInteger(exitInfo.code) ? exitInfo.code : "unknown"
+      `[main] graceful stop completed event=${exitInfo.event || "exit"} code=${Number.isInteger(exitInfo.code) ? exitInfo.code : "unknown"
       }`,
     );
 

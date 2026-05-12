@@ -24,6 +24,7 @@ const {
   commentOnSearchResults,
 } = require("./threadBot");
 
+const { createThreadCommentRecommendingLink } = require("../../llm/runLlm");
 const { closeAll, armProfilePromotion, finalizeProfilePromotion } = require("../../core/browserEngine");
 const { sleep } = require("../../core/helpers");
 
@@ -111,7 +112,13 @@ function appendHistory(entry) {
 const THREAD_TARGET_KEYWORD = readEnvString("THREAD_TARGET_KEYWORD", "").trim();
 const THREAD_TARGET_DATE_RANGE = readEnvString("THREAD_TARGET_DATE_RANGE", "").trim();
 const THREAD_TARGET_COMMENT_COUNT = readEnvNumber("THREAD_TARGET_COMMENT_COUNT", 0);
-const THREAD_TARGET_COMMENT_TEXT = readEnvString("THREAD_TARGET_COMMENT_TEXT", "").trim();
+
+const THREAD_RECOMMEND_LINK = readEnvString(
+  "THREAD_RECOMMEND_LINK",
+  "http://monio.co.kr/",
+).trim();
+
+const THREAD_COMMENT_LANGUAGE = readEnvString("THREAD_COMMENT_LANGUAGE", "en").trim();
 const THREAD_SEARCH_OPTION = readEnvString("THREAD_SEARCH_OPTION", "default").trim() || "default";
 const THREAD_EXPLORE_MINUTES = readEnvNumber("THREAD_EXPLORE_MINUTES", 10);
 
@@ -126,7 +133,8 @@ const STANDBY_POLL_MS = readEnvNumber("BOT_STANDBY_POLL_MS", 2000);
 function hasCommentJobConfig() {
   return Boolean(
     THREAD_TARGET_KEYWORD &&
-    THREAD_TARGET_COMMENT_TEXT &&
+    THREAD_RECOMMEND_LINK &&
+    THREAD_COMMENT_LANGUAGE &&
     THREAD_TARGET_COMMENT_COUNT > 0
   );
 }
@@ -146,6 +154,8 @@ function getRunSummaryLine() {
     `keyword=${THREAD_TARGET_KEYWORD || "(없음)"}`,
     `dateRange=${THREAD_TARGET_DATE_RANGE || "(없음)"}`,
     `count=${THREAD_TARGET_COMMENT_COUNT}`,
+    `recommendLink=${THREAD_RECOMMEND_LINK || "(없음)"}`,
+    `commentLanguage=${THREAD_COMMENT_LANGUAGE || "(없음)"}`,
     `searchOption=${THREAD_SEARCH_OPTION || "(없음)"}`,
     `exploreMinutes=${THREAD_EXPLORE_MINUTES}`,
   ].join(" ");
@@ -281,9 +291,15 @@ async function runThread() {
         keyword: THREAD_TARGET_KEYWORD,
         dateRange: THREAD_TARGET_DATE_RANGE,
         count: THREAD_TARGET_COMMENT_COUNT,
-        commentText: THREAD_TARGET_COMMENT_TEXT,
         searchOption: THREAD_SEARCH_OPTION,
         exploreMinutes: THREAD_EXPLORE_MINUTES,
+        createCommentText: async ({ post }) => {
+          return createThreadCommentRecommendingLink({
+            postText: post.postText || post.postUrl || THREAD_TARGET_KEYWORD,
+            link: THREAD_RECOMMEND_LINK,
+            language: THREAD_COMMENT_LANGUAGE,
+          });
+        },
       });
 
       page = result?.page || page;
@@ -295,7 +311,8 @@ async function runThread() {
           keyword: THREAD_TARGET_KEYWORD,
           dateRange: THREAD_TARGET_DATE_RANGE,
           count: THREAD_TARGET_COMMENT_COUNT,
-          commentText: THREAD_TARGET_COMMENT_TEXT,
+          recommendLink: THREAD_RECOMMEND_LINK,
+          commentLanguage: THREAD_COMMENT_LANGUAGE,
           searchOption: THREAD_SEARCH_OPTION,
           exploreMinutes: THREAD_EXPLORE_MINUTES,
         },
@@ -346,6 +363,8 @@ async function runThread() {
         keyword: THREAD_TARGET_KEYWORD,
         dateRange: THREAD_TARGET_DATE_RANGE,
         count: THREAD_TARGET_COMMENT_COUNT,
+        recommendLink: THREAD_RECOMMEND_LINK,
+        commentLanguage: THREAD_COMMENT_LANGUAGE,
         searchOption: THREAD_SEARCH_OPTION,
         exploreMinutes: THREAD_EXPLORE_MINUTES,
       },

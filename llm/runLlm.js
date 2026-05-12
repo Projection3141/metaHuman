@@ -138,6 +138,22 @@ async function createRedditCommentRecommendingLink({
   });
 }
 
+async function createThreadCommentRecommendingLink({
+  postText,
+  link = DEFAULT_RECOMMEND_LINK,
+  language = "en",
+} = {}) {
+  return createPlatformCommentRecommendingLink({
+    platformName: "Threads",
+    communityLabel: "",
+    communityValue: "",
+    title: postText,
+    link,
+    language,
+  });
+}
+
 module.exports = {
   createRedditCommentRecommendingLink,
+  createThreadCommentRecommendingLink,
 };

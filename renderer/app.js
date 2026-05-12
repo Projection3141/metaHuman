@@ -33,7 +33,8 @@ const state = {
       dateRange: "",
       keyword: "",
       commentCount: 1,
-      commentText: "",
+      recommendLink: "http://monio.co.kr/",
+      commentLanguage: "en",
       searchOption: "default",   // default | recent
       exploreMinutes: 10,
       userDataDirMode: "persistent",
@@ -80,7 +81,7 @@ function getThreadSearchOptionLabel(value) {
   return "인기 검색";
 }
 
-function getRedditCommentLanguageLabel(value) {
+function getCommentLanguageLabel(value) {
   if (value === "ko") return "한국어";
   if (value === "zh") return "중국어";
   if (value === "ja") return "일본어";
@@ -286,12 +287,24 @@ function renderBotConfig() {
         />
       </div>
 
-      <div class="bot-config-row">
-        <label for="thread-comment-text">댓글 내용</label>
-        <textarea id="thread-comment-text" placeholder="댓글 텍스트...">${escapeHtml(
-          state.config.thread.commentText,
-        )}</textarea>
-      </div>
+  <div class="bot-config-row">
+    <label for="thread-comment-language">댓글 언어</label>
+    <select id="thread-comment-language" class="select">
+      <option value="ko" ${state.config.thread.commentLanguage === "ko" ? "selected" : ""}>한국어</option>
+      <option value="zh" ${state.config.thread.commentLanguage === "zh" ? "selected" : ""}>중국어</option>
+      <option value="ja" ${state.config.thread.commentLanguage === "ja" ? "selected" : ""}>일본어</option>
+      <option value="en" ${state.config.thread.commentLanguage === "en" ? "selected" : ""}>영어</option>
+    </select>
+  </div>
+
+  <div class="bot-config-row">
+    <label for="thread-recommend-link">추천 링크</label>
+    <input
+      id="thread-recommend-link"
+      placeholder="http://monio.co.kr/"
+      value="${escapeHtml(state.config.thread.recommendLink)}"
+    />
+  </div>
 
       <div class="bot-config-row">
         <label for="thread-user-data-dir-mode">로그인 방식</label>
@@ -358,7 +371,8 @@ function updateBotConfigUI() {
     const searchOption = document.getElementById("thread-search-option");
     const commentCount = document.getElementById("thread-comment-count");
     const exploreMinutes = document.getElementById("thread-explore-minutes");
-    const commentText = document.getElementById("thread-comment-text");
+    const commentLanguage = document.getElementById("thread-comment-language");
+    const recommendLink = document.getElementById("thread-recommend-link");
     const loginKeepToggle = document.getElementById("thread-login-keep-toggle");
     const threadUserDataDirMode = document.getElementById("thread-user-data-dir-mode");
 
@@ -367,7 +381,8 @@ function updateBotConfigUI() {
     if (searchOption) searchOption.value = state.config.thread.searchOption;
     if (commentCount) commentCount.value = state.config.thread.commentCount;
     if (exploreMinutes) exploreMinutes.value = state.config.thread.exploreMinutes;
-    if (commentText) commentText.value = state.config.thread.commentText;
+    if (commentLanguage) commentLanguage.value = state.config.thread.commentLanguage;
+    if (recommendLink) recommendLink.value = state.config.thread.recommendLink;
     if (loginKeepToggle) { loginKeepToggle.checked = state.config.thread.userDataDirMode === "persistent"; }
     if (threadUserDataDirMode) { threadUserDataDirMode.value = normalizeUserDataDirMode(state.config.thread.userDataDirMode); }
   }
@@ -461,8 +476,12 @@ function handleBotConfigInput(event) {
     return;
   }
 
-  if (id === "thread-comment-text") {
-    state.config.thread.commentText = value;
+  if (id === "thread-comment-language") {
+    state.config.thread.commentLanguage = value;
+  }
+
+  if (id === "thread-recommend-link") {
+    state.config.thread.recommendLink = value;
   }
 
   if (id === "thread-user-data-dir-mode") {
@@ -595,7 +614,13 @@ function validateBotConfig(key) {
   if (key === "reddit") {
     const cfg = state.config.reddit;
 
-    if (!cfg.subreddit || !cfg.keyword || !cfg.recommendLink || !cfg.commentLanguage || !isPositiveNumber(cfg.commentCount)) {
+    if (
+      !cfg.subreddit || 
+      !cfg.keyword || 
+      !cfg.recommendLink || 
+      !cfg.commentLanguage || 
+      !isPositiveNumber(cfg.commentCount)
+    ) {
       return {
         ok: false,
         message:
@@ -612,11 +637,17 @@ function validateBotConfig(key) {
   if (key === "thread") {
     const cfg = state.config.thread;
 
-    if (!cfg.keyword || !cfg.commentText || !isPositiveNumber(cfg.commentCount) || !isPositiveNumber(cfg.exploreMinutes)) {
+    if (
+      !cfg.keyword ||
+      !cfg.recommendLink ||
+      !cfg.commentLanguage ||
+      !isPositiveNumber(cfg.commentCount) ||
+      !isPositiveNumber(cfg.exploreMinutes)
+    ) {
       return {
         ok: false,
         message:
-          "Thread 설정이 불완전합니다. 키워드, 댓글 개수, 댓글 내용, 탐색 시간을 모두 올바르게 입력해 주세요.",
+          "Thread 설정이 불완전합니다. 키워드, 댓글 개수, 추천 링크, 댓글 언어, 탐색 시간을 모두 올바르게 입력해 주세요.",
       };
     }
 
@@ -735,7 +766,7 @@ function renderHistory(history = []) {
       }
 
       if (config.commentLanguage) {
-        meta.push(`language: ${escapeHtml(getRedditCommentLanguageLabel(config.commentLanguage))}`);
+        meta.push(`language: ${escapeHtml(getCommentLanguageLabel(config.commentLanguage))}`);
       }
 
       if (typeof config.exploreMinutes !== "undefined") {
@@ -749,7 +780,7 @@ function renderHistory(history = []) {
           <div class="meta">
             <div>조건: ${meta.length ? meta.join(" / ") : "-"}</div>
             <div>
-              ${target === "reddit"
+              ${target === "reddit" || target === "thread"
           ? `추천 링크: ${escapeHtml(config.recommendLink || "(없음)")}`
           : `댓글 내용: ${escapeHtml(config.commentText || "(없음)")}`
         }

@@ -19,6 +19,163 @@ function sleep(ms) {
 }
 
 /** ****************************************************************************
+ * Threads UI 다국어 용어
+ *
+ * 역할:
+ *  - aria-label / aria-placeholder / button text가 언어별로 달라도
+ *    답글 버튼, 답글 입력창, 게시 버튼을 찾을 수 있게 한다.
+ ******************************************************************************/
+const THREAD_UI_TERMS = Object.freeze({
+    replyAction: [
+        "답글",
+        "댓글",
+        "reply",
+        "replies",
+        "comment",
+        "comments",
+
+        "返信",
+        "リプライ",
+        "コメント",
+
+        "回复",
+        "回覆",
+        "留言",
+        "评论",
+        "評論",
+
+        "responder",
+        "respuesta",
+        "resposta",
+        "répondre",
+        "réponse",
+        "antworten",
+        "rispondi",
+        "risposta",
+
+        "ответить",
+        "комментировать",
+
+        "رد",
+        "إجابة",
+
+        "ตอบกลับ",
+        "balas",
+        "membalas",
+        "trả lời",
+        "phản hồi",
+        "yanıtla",
+    ],
+
+    replyEditor: [
+        "답글",
+        "댓글",
+        "남기기",
+        "입력",
+        "텍스트 필드",
+
+        "reply",
+        "comment",
+        "write",
+        "respond",
+        "text field",
+        "textbox",
+
+        "返信",
+        "リプライ",
+        "コメント",
+        "入力",
+        "テキスト",
+
+        "回复",
+        "回覆",
+        "留言",
+        "评论",
+        "評論",
+        "输入",
+        "輸入",
+
+        "responder",
+        "comentar",
+        "répondre",
+        "commenter",
+        "antworten",
+        "kommentar",
+        "rispondi",
+        "commenta",
+
+        "ответить",
+        "комментарий",
+
+        "رد",
+        "تعليق",
+
+        "ตอบกลับ",
+        "ความคิดเห็น",
+        "balas",
+        "komentar",
+        "trả lời",
+        "bình luận",
+        "yanıt",
+        "yorum",
+    ],
+
+    submitAction: [
+        "게시",
+        "게시하기",
+        "등록",
+        "등록하기",
+        "올리기",
+
+        "post",
+        "send",
+        "submit",
+        "publish",
+        "comment",
+        "reply",
+
+        "投稿",
+        "送信",
+        "返信",
+        "コメント",
+
+        "发布",
+        "發佈",
+        "发表",
+        "發表",
+        "发送",
+        "發送",
+        "送出",
+        "回复",
+        "回覆",
+
+        "publicar",
+        "enviar",
+        "publier",
+        "envoyer",
+        "senden",
+        "veröffentlichen",
+        "invia",
+        "pubblica",
+
+        "отправить",
+        "опубликовать",
+
+        "نشر",
+        "إرسال",
+
+        "โพสต์",
+        "ส่ง",
+        "kirim",
+        "terbitkan",
+        "đăng",
+        "gửi",
+        "yanıtla",
+        "gönder",
+    ],
+});
+
+/** ****************************************************************************
  * 로그인 도중 발생 가능한 일시적 navigation 에러 판정
  ******************************************************************************/
 function isTransientContextError(error) {
@@ -366,13 +523,61 @@ function extractThreadPostTextInBrowser(node) {
  ******************************************************************************/
 async function collectThreadFeedItems(page, { dateRange, keyword }) {
     const items = await page.evaluate(
-        ({ range, searchKeyword }) => {
+        ({ range, searchKeyword, uiTerms }) => {
             const normalize = (value) =>
                 String(value || "")
                     .normalize("NFKC")
                     .replace(/\s+/g, " ")
                     .trim()
                     .toLowerCase();
+
+            const normalizeUiText = (value) =>
+                String(value || "")
+                    .normalize("NFKC")
+                    .replace(/\s+/g, " ")
+                    .trim()
+                    .toLowerCase();
+
+            const includesAnyTerm = (value, terms) => {
+                const text = normalizeUiText(value);
+                if (!text) return false;
+
+                return Array.isArray(terms) && terms.some((term) => {
+                    const normalizedTerm = normalizeUiText(term);
+                    return normalizedTerm && text.includes(normalizedTerm);
+                });
+            };
+
+            const getElementLabelText = (el) => {
+                if (!el) return "";
+
+                return [
+                    el.getAttribute?.("aria-label"),
+                    el.getAttribute?.("aria-placeholder"),
+                    el.getAttribute?.("title"),
+                    el.textContent,
+                ]
+                    .filter(Boolean)
+                    .join(" ");
+            };
+
+            const findLocalizedSvg = (root, terms) => {
+                const svgs = Array.from(root.querySelectorAll("svg[aria-label]"));
+
+                return svgs.find((svg) =>
+                    includesAnyTerm(svg.getAttribute("aria-label"), terms),
+                ) || null;
+            };
+
+            const findLocalizedButton = (root, terms) => {
+                const buttons = Array.from(
+                    root.querySelectorAll("[role='button'], button"),
+                );
+
+                return buttons.find((button) =>
+                    includesAnyTerm(getElementLabelText(button), terms),
+                ) || null;
+            };
 
             const inRange = (datetimeValue) => {
                 if (!datetimeValue) return false;
@@ -459,9 +664,10 @@ async function collectThreadFeedItems(page, { dateRange, keyword }) {
                         .map((anchor) => anchor.href)
                         .find((href) => /\/post\//i.test(href)) || "";
 
-                const replySvg =
-                    node.querySelector("svg[aria-label='답글']") ||
-                    node.querySelector("svg[aria-label='Reply']");
+                const replySvg = findLocalizedSvg(node, uiTerms.replyAction);
+                const replyButton = replySvg
+                    ? replySvg.closest?.("div[role='button'], [role='button']")
+                    : findLocalizedButton(node, uiTerms.replyAction);
 
                 const postText = extractPostText(node);
 
@@ -470,7 +676,7 @@ async function collectThreadFeedItems(page, { dateRange, keyword }) {
                     pagelet: node.getAttribute("data-pagelet") || "",
                     datetime,
                     postUrl,
-                    hasReplyButton: Boolean(replySvg),
+                    hasReplyButton: Boolean(replySvg || replyButton),
                     postText,
                     inRange: inRange(datetime),
                     matchesKeyword: matchesKeyword(postText, searchKeyword),
@@ -480,6 +686,7 @@ async function collectThreadFeedItems(page, { dateRange, keyword }) {
         {
             range: dateRange,
             searchKeyword: keyword,
+            uiTerms: THREAD_UI_TERMS,
         },
     );
 
@@ -547,8 +754,8 @@ async function collectThreadFeedItems(page, { dateRange, keyword }) {
  * 검색 결과 카드의 답글 버튼 클릭
  *
  * 변경된 Threads 동작:
- *  - 검색 결과에서 답글 버튼 클릭 시 모달이 아니라 게시글 상세 페이지로 이동한다.
- *  - 이 함수는 "모달 열기"가 아니라 "답글 클릭 후 상세 페이지 editor 준비"까지 담당한다.
+ *  - 검색 결과에서 답글 버튼 클릭 시 게시글 상세 페이지로 이동한다.
+ *  - UI 언어가 달라도 aria-label / text 기반으로 답글 액션을 찾는다.
  ******************************************************************************/
 async function openReplyModalFromFeed(page, postUrl) {
     if (!postUrl) {
@@ -564,10 +771,51 @@ async function openReplyModalFromFeed(page, postUrl) {
         })
         .catch(() => null);
 
-    const clicked = await page.evaluate((targetUrl) => {
-        const nodes = Array.from(
-            document.querySelectorAll("div[data-pagelet^='threads_search_results_']"),
-        );
+    const clicked = await page.evaluate((targetUrl, uiTerms) => {
+        const normalizeUiText = (value) =>
+            String(value || "")
+                .normalize("NFKC")
+                .replace(/\s+/g, " ")
+                .trim()
+                .toLowerCase();
+
+        const includesAnyTerm = (value, terms) => {
+            const text = normalizeUiText(value);
+            if (!text) return false;
+
+            return Array.isArray(terms) && terms.some((term) => {
+                const normalizedTerm = normalizeUiText(term);
+                return normalizedTerm && text.includes(normalizedTerm);
+            });
+        };
+
+        const getElementLabelText = (el) => {
+            if (!el) return "";
+
+            return [
+                el.getAttribute?.("aria-label"),
+                el.getAttribute?.("aria-placeholder"),
+                el.getAttribute?.("title"),
+                el.textContent,
+            ]
+                .filter(Boolean)
+                .join(" ");
+        };
+
+        const isVisible = (el) => {
+            if (!el) return false;
+
+            const style = window.getComputedStyle(el);
+            const rect = el.getBoundingClientRect();
+
+            return (
+                style.display !== "none" &&
+                style.visibility !== "hidden" &&
+                Number(style.opacity || "1") !== 0 &&
+                rect.width > 0 &&
+                rect.height > 0
+            );
+        };
 
         const findPostUrl = (node) => {
             const anchors = Array.from(node.querySelectorAll("a[href]"));
@@ -579,20 +827,47 @@ async function openReplyModalFromFeed(page, postUrl) {
             );
         };
 
+        const findReplyButton = (node) => {
+            const svgs = Array.from(node.querySelectorAll("svg[aria-label]"));
+
+            for (const svg of svgs) {
+                if (!includesAnyTerm(svg.getAttribute("aria-label"), uiTerms.replyAction)) {
+                    continue;
+                }
+
+                const button =
+                    svg.closest?.("div[role='button'], [role='button']") ||
+                    svg.parentElement?.closest?.("div[role='button'], [role='button']");
+
+                if (button && isVisible(button)) {
+                    return button;
+                }
+            }
+
+            const buttons = Array.from(
+                node.querySelectorAll("[role='button'], button"),
+            );
+
+            for (const button of buttons) {
+                if (!isVisible(button)) continue;
+
+                if (includesAnyTerm(getElementLabelText(button), uiTerms.replyAction)) {
+                    return button;
+                }
+            }
+
+            return null;
+        };
+
+        const nodes = Array.from(
+            document.querySelectorAll("div[data-pagelet^='threads_search_results_']"),
+        );
+
         for (const node of nodes) {
             const currentPostUrl = findPostUrl(node);
             if (!currentPostUrl || currentPostUrl !== targetUrl) continue;
 
-            const svg =
-                node.querySelector("svg[aria-label='답글']") ||
-                node.querySelector("svg[aria-label='Reply']");
-
-            if (!svg) continue;
-
-            const button =
-                svg.closest?.("div[role='button'], [role='button']") ||
-                svg.parentElement?.closest?.("div[role='button'], [role='button']");
-
+            const button = findReplyButton(node);
             if (!button) continue;
 
             button.scrollIntoView({
@@ -606,7 +881,7 @@ async function openReplyModalFromFeed(page, postUrl) {
         }
 
         return false;
-    }, postUrl);
+    }, postUrl, THREAD_UI_TERMS);
 
     if (!clicked) {
         throw new Error("THREAD_REPLY_BUTTON_NOT_FOUND");
@@ -656,7 +931,24 @@ async function openReplyModalFromPostPage(page, timeoutMs = 15000) {
     const startedAt = Date.now();
 
     while (Date.now() - startedAt < timeoutMs) {
-        const result = await page.evaluate(() => {
+        const result = await page.evaluate((uiTerms) => {
+            const normalizeUiText = (value) =>
+                String(value || "")
+                    .normalize("NFKC")
+                    .replace(/\s+/g, " ")
+                    .trim()
+                    .toLowerCase();
+
+            const includesAnyTerm = (value, terms) => {
+                const text = normalizeUiText(value);
+                if (!text) return false;
+
+                return Array.isArray(terms) && terms.some((term) => {
+                    const normalizedTerm = normalizeUiText(term);
+                    return normalizedTerm && text.includes(normalizedTerm);
+                });
+            };
+
             const isVisible = (el) => {
                 if (!el) return false;
 
@@ -673,9 +965,9 @@ async function openReplyModalFromPostPage(page, timeoutMs = 15000) {
             };
 
             const svgs = Array.from(
-                document.querySelectorAll(
-                    "svg[aria-label='답글'], svg[aria-label='Reply']",
-                ),
+                document.querySelectorAll("svg[aria-label]"),
+            ).filter((svg) =>
+                includesAnyTerm(svg.getAttribute("aria-label"), uiTerms.replyAction),
             );
 
             for (const svg of svgs) {
@@ -711,7 +1003,7 @@ async function openReplyModalFromPostPage(page, timeoutMs = 15000) {
                 svgCount: svgs.length,
                 url: location.href,
             };
-        });
+        }, THREAD_UI_TERMS);
 
         if (result?.ok) {
             console.log(
@@ -771,20 +1063,34 @@ async function restoreThreadSearchPage(page, returnUrl) {
 }
 
 /** ****************************************************************************
- * 댓글 모달 editor 대기
- ******************************************************************************/
-/** ****************************************************************************
  * 답글 editor 대기 및 포커스
  *
- * 변경된 Threads 동작:
- *  - 답글 버튼 클릭 후 상세 페이지로 이동하면서 inline textbox가 이미 준비된다.
- *  - 더 이상 dialog 내부 editor만 찾으면 안 된다.
+ * 역할:
+ *  - 상세 페이지 이동 후 이미 준비된 inline reply textbox를 찾는다.
+ *  - aria-label / aria-placeholder가 여러 언어로 바뀌어도 점수 기반으로 선택한다.
  ******************************************************************************/
 async function waitForReplyEditor(page, timeoutMs = 15000) {
     const startedAt = Date.now();
 
     while (Date.now() - startedAt < timeoutMs) {
-        const result = await page.evaluate(() => {
+        const result = await page.evaluate((uiTerms) => {
+            const normalizeUiText = (value) =>
+                String(value || "")
+                    .normalize("NFKC")
+                    .replace(/\s+/g, " ")
+                    .trim()
+                    .toLowerCase();
+
+            const includesAnyTerm = (value, terms) => {
+                const text = normalizeUiText(value);
+                if (!text) return false;
+
+                return Array.isArray(terms) && terms.some((term) => {
+                    const normalizedTerm = normalizeUiText(term);
+                    return normalizedTerm && text.includes(normalizedTerm);
+                });
+            };
+
             const isVisible = (el) => {
                 if (!el) return false;
 
@@ -814,15 +1120,16 @@ async function waitForReplyEditor(page, timeoutMs = 15000) {
                 .map((editor) => {
                     const ariaLabel = String(editor.getAttribute("aria-label") || "");
                     const ariaPlaceholder = String(editor.getAttribute("aria-placeholder") || "");
-                    const text = `${ariaLabel} ${ariaPlaceholder}`;
+                    const title = String(editor.getAttribute("title") || "");
+                    const text = `${ariaLabel} ${ariaPlaceholder} ${title}`;
 
                     let score = 0;
 
-                    if (text.includes("답글")) score += 100;
-                    if (text.toLowerCase().includes("reply")) score += 100;
+                    if (includesAnyTerm(text, uiTerms.replyEditor)) score += 120;
+                    if (includesAnyTerm(text, uiTerms.replyAction)) score += 80;
                     if (editor.getAttribute("data-lexical-editor") === "true") score += 30;
                     if (document.activeElement === editor) score += 50;
-                    if (ariaLabel.includes("텍스트 필드")) score += 10;
+                    if (editor.isContentEditable) score += 20;
 
                     return {
                         editor,
@@ -858,7 +1165,7 @@ async function waitForReplyEditor(page, timeoutMs = 15000) {
                 ariaLabel: picked.ariaLabel,
                 ariaPlaceholder: picked.ariaPlaceholder,
             };
-        });
+        }, THREAD_UI_TERMS);
 
         if (result?.ok) {
             console.log(
@@ -908,15 +1215,45 @@ async function typeReplyText(page, commentText) {
 /** ****************************************************************************
  * 댓글 게시 버튼 클릭
  *
- * 변경된 Threads 동작:
- *  - 게시 버튼이 dialog 안이 아닐 수 있다.
- *  - 현재 활성화된 reply editor 주변에서 먼저 찾고, 실패하면 페이지 전체에서 찾는다.
+ * 역할:
+ *  - 게시 / Post / Send / Publish / 送信 / 发布 등 다국어 버튼을 찾는다.
+ *  - 먼저 editor 주변 ancestor에서 찾고, 실패하면 dialog, 마지막으로 document에서 찾는다.
  ******************************************************************************/
 async function submitReply(page, timeoutMs = 15000) {
     const startedAt = Date.now();
 
     while (Date.now() - startedAt < timeoutMs) {
-        const clicked = await page.evaluate(() => {
+        const clicked = await page.evaluate((uiTerms) => {
+            const normalizeUiText = (value) =>
+                String(value || "")
+                    .normalize("NFKC")
+                    .replace(/\s+/g, " ")
+                    .trim()
+                    .toLowerCase();
+
+            const includesAnyTerm = (value, terms) => {
+                const text = normalizeUiText(value);
+                if (!text) return false;
+
+                return Array.isArray(terms) && terms.some((term) => {
+                    const normalizedTerm = normalizeUiText(term);
+                    return normalizedTerm && text.includes(normalizedTerm);
+                });
+            };
+
+            const getElementLabelText = (el) => {
+                if (!el) return "";
+
+                return [
+                    el.getAttribute?.("aria-label"),
+                    el.getAttribute?.("aria-placeholder"),
+                    el.getAttribute?.("title"),
+                    el.textContent,
+                ]
+                    .filter(Boolean)
+                    .join(" ");
+            };
+
             const isVisible = (el) => {
                 if (!el) return false;
 
@@ -939,18 +1276,25 @@ async function submitReply(page, timeoutMs = 15000) {
                 return !el.disabled && !ariaDisabled;
             };
 
-            const isSubmitButton = (el) => {
-                const text = String(el.textContent || "").trim().toLowerCase();
+            const isSubmitButton = (el, allowLooseReplyTerms = false) => {
+                const labelText = getElementLabelText(el);
 
-                return (
-                    text === "게시" ||
-                    text === "답글" ||
-                    text === "post" ||
-                    text === "comment"
-                );
+                if (includesAnyTerm(labelText, uiTerms.submitAction)) {
+                    return true;
+                }
+
+                /**
+                 * editor 주변에서만 reply/comment 계열 단어도 submit 후보로 허용한다.
+                 * document 전체 fallback에서 허용하면 다른 답글 버튼을 잘못 누를 수 있다.
+                 */
+                if (allowLooseReplyTerms && includesAnyTerm(labelText, uiTerms.replyAction)) {
+                    return true;
+                }
+
+                return false;
             };
 
-            const clickButtonInRoot = (root) => {
+            const clickButtonInRoot = (root, allowLooseReplyTerms = false) => {
                 if (!root) return false;
 
                 const buttons = Array.from(
@@ -960,7 +1304,7 @@ async function submitReply(page, timeoutMs = 15000) {
                 for (const button of buttons) {
                     if (!isVisible(button)) continue;
                     if (!isEnabled(button)) continue;
-                    if (!isSubmitButton(button)) continue;
+                    if (!isSubmitButton(button, allowLooseReplyTerms)) continue;
 
                     button.scrollIntoView({
                         block: "center",
@@ -975,38 +1319,57 @@ async function submitReply(page, timeoutMs = 15000) {
                 return false;
             };
 
+            const editors = Array.from(
+                document.querySelectorAll(
+                    [
+                        "div[role='textbox'][contenteditable='true']",
+                        "div[role='textbox'][contenteditable='']",
+                        "[data-lexical-editor='true'][role='textbox']",
+                    ].join(","),
+                ),
+            );
+
             const activeEditor =
                 document.activeElement?.closest?.("div[role='textbox'][contenteditable]") ||
-                document.querySelector("div[role='textbox'][contenteditable][aria-placeholder*='답글']") ||
-                document.querySelector("div[role='textbox'][contenteditable][aria-placeholder*='reply' i]") ||
-                document.querySelector("[data-lexical-editor='true'][role='textbox']");
+                editors.find((editor) =>
+                    includesAnyTerm(
+                        [
+                            editor.getAttribute("aria-label"),
+                            editor.getAttribute("aria-placeholder"),
+                            editor.getAttribute("title"),
+                        ].filter(Boolean).join(" "),
+                        uiTerms.replyEditor,
+                    )
+                ) ||
+                editors[0];
 
-            /** ------------------------------------------------------------------
-             * 1) editor 주변 ancestor에서 우선 탐색
-             * ---------------------------------------------------------------- */
+            /**
+             * 1) editor 주변 ancestor에서 우선 탐색.
+             */
             let current = activeEditor;
 
             for (let i = 0; i < 8 && current; i += 1) {
-                if (clickButtonInRoot(current)) {
+                if (clickButtonInRoot(current, true)) {
                     return true;
                 }
 
                 current = current.parentElement;
             }
 
-            /** ------------------------------------------------------------------
-             * 2) dialog fallback
-             * ---------------------------------------------------------------- */
+            /**
+             * 2) dialog fallback.
+             */
             const dialog = document.querySelector("[role='dialog']");
-            if (clickButtonInRoot(dialog)) {
+            if (clickButtonInRoot(dialog, true)) {
                 return true;
             }
 
-            /** ------------------------------------------------------------------
-             * 3) page 전체 fallback
-             * ---------------------------------------------------------------- */
-            return clickButtonInRoot(document);
-        });
+            /**
+             * 3) page 전체 fallback.
+             * 여기서는 submitAction만 허용한다.
+             */
+            return clickButtonInRoot(document, false);
+        }, THREAD_UI_TERMS);
 
         if (clicked) {
             console.log("[thread][reply.submit] clicked");
