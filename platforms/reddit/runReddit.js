@@ -26,7 +26,7 @@ const {
 
 const { closeAll, armProfilePromotion, finalizeProfilePromotion, } = require("../../core/browserEngine");
 const { sleep } = require("../../core/helpers");
-const { createCommentRecommendingLink } = require("../../llm/runLlm");
+const { createRedditCommentRecommendingLink } = require("../../llm/runLlm");
 
 /** ****************************************************************************
  * 안전한 문자열 env 읽기
@@ -344,7 +344,7 @@ async function runReddit() {
         dateRange: REDDIT_TARGET_DATE_RANGE,
         count: REDDIT_TARGET_COMMENT_COUNT,
         createCommentText: async ({ post }) => {
-          return createCommentRecommendingLink({
+          return createRedditCommentRecommendingLink({
             subreddit: REDDIT_TARGET_SUBREDDIT,
             title: post.title,
             link: REDDIT_RECOMMEND_LINK,
