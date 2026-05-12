@@ -31,7 +31,7 @@ async function enterSite({
     localeProfileKey = "kr",
     headless = false,
     viewport = { width: 1280, height: 900 },
-    useTempProfile = false,
+    userDataDirMode = "persistent",
 } = {}) {
     return openPage({
         url: targetUrl,
@@ -39,7 +39,7 @@ async function enterSite({
         localeProfileKey,
         headless,
         viewport,
-        userDataDirMode: useTempProfile ? "temp" : "persistent",
+        userDataDirMode: normalizeUserDataDirMode(userDataDirMode),
         useMobile: false,
         tag: "thread.page",
         launchArgs: [
@@ -47,6 +47,22 @@ async function enterSite({
             "--disable-setuid-sandbox",
         ],
     });
+}
+
+function normalizeUserDataDirMode(mode) {
+  /**
+   * persistent:
+   *  - 기존 로그인 유지
+   *
+   * temp:
+   *  - 새 로그인 1회
+   *
+   * promote:
+   *  - 새 로그인 후 유지
+   */
+  if (mode === "temp") return "temp";
+  if (mode === "promote") return "promote";
+  return "persistent";
 }
 
 /** ****************************************************************************
@@ -206,7 +222,7 @@ async function commentOnSearchResults(
             if (commentedUrls.length >= targetCount) break;
 
             try {
-                console.log("[thread][comment] posting to", item.postUrl);
+                console.log(`[thread][comment] posting to ${item.postUrl}`);
                 await commentOnThreadFeedItem(page, {
                     postUrl: item.postUrl,
                     commentText,

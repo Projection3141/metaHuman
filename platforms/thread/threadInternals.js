@@ -491,10 +491,79 @@ async function collectThreadFeedItems(page, { dateRange, keyword }) {
  *
  * 기준:
  *  - svg[aria-label="답글"] 찾기
- *  - 4번 상위 div 이동
+ *  - 가까운 상위 div 이동
  *  - role="button" 클릭
  ******************************************************************************/
+// async function openReplyModalFromFeed(page, postUrl) {
+//     const clicked = await page.evaluate((targetUrl) => {
+//         const nodes = Array.from(
+//             document.querySelectorAll("div[data-pagelet^='threads_search_results_']"),
+//         );
+
+//         const findPostUrl = (node) => {
+//             const anchors = Array.from(node.querySelectorAll("a[href]"));
+//             return (
+//                 anchors
+//                     .map((anchor) => anchor.href)
+//                     .find((href) => /\/post\//i.test(href)) || ""
+//             );
+//         };
+
+//         for (const node of nodes) {
+//             const currentPostUrl = findPostUrl(node);
+//             if (!currentPostUrl || currentPostUrl !== targetUrl) continue;
+
+//             const svg =
+//                 node.querySelector("svg[aria-label='답글']") ||
+//                 node.querySelector("svg[aria-label='Reply']");
+
+//             if (!svg) continue;
+
+//             const button =
+//                 svg.closest?.("div[role='button'], [role='button']") ||
+//                 svg.parentElement?.closest?.("div[role='button'], [role='button']");
+
+//             if (!button) continue;
+
+//             button.scrollIntoView({
+//                 block: "center",
+//                 inline: "center",
+//                 behavior: "instant",
+//             });
+
+//             button.click();
+//             return true;
+//         }
+
+//         return false;
+//     }, postUrl);
+
+//     if (!clicked) {
+//         throw new Error("THREAD_REPLY_BUTTON_NOT_FOUND");
+//     }
+// }
+
+/** ****************************************************************************
+ * 검색 결과 카드의 답글 버튼 클릭
+ *
+ * 변경된 Threads 동작:
+ *  - 검색 결과에서 답글 버튼 클릭 시 모달이 아니라 게시글 상세 페이지로 이동한다.
+ *  - 이 함수는 "모달 열기"가 아니라 "답글 클릭 후 상세 페이지 editor 준비"까지 담당한다.
+ ******************************************************************************/
 async function openReplyModalFromFeed(page, postUrl) {
+    if (!postUrl) {
+        throw new Error("openReplyModalFromFeed: postUrl is required");
+    }
+
+    const beforeUrl = page.url();
+
+    const navigationPromise = page
+        .waitForNavigation({
+            waitUntil: "domcontentloaded",
+            timeout: 15000,
+        })
+        .catch(() => null);
+
     const clicked = await page.evaluate((targetUrl) => {
         const nodes = Array.from(
             document.querySelectorAll("div[data-pagelet^='threads_search_results_']"),
@@ -502,6 +571,7 @@ async function openReplyModalFromFeed(page, postUrl) {
 
         const findPostUrl = (node) => {
             const anchors = Array.from(node.querySelectorAll("a[href]"));
+
             return (
                 anchors
                     .map((anchor) => anchor.href)
@@ -517,7 +587,7 @@ async function openReplyModalFromFeed(page, postUrl) {
                 node.querySelector("svg[aria-label='답글']") ||
                 node.querySelector("svg[aria-label='Reply']");
 
-            if (!svg) return false;
+            if (!svg) continue;
 
             const button =
                 svg.closest?.("div[role='button'], [role='button']") ||
@@ -541,32 +611,269 @@ async function openReplyModalFromFeed(page, postUrl) {
     if (!clicked) {
         throw new Error("THREAD_REPLY_BUTTON_NOT_FOUND");
     }
+
+    await navigationPromise;
+    await sleep(1000);
+
+    console.log(`[thread][reply] clicked from=${beforeUrl} to=${page.url()}`);
+
+    await waitForReplyEditor(page, 15000);
+}
+
+/** ****************************************************************************
+ * 게시글 상세 페이지로 이동
+ *
+ * 역할:
+ *  - 검색 결과 카드에서 바로 답글 모달을 열지 않고
+ *  - 수집해둔 postUrl 상세 페이지로 이동한다.
+ ******************************************************************************/
+async function openThreadPostPage(page, postUrl) {
+    if (!postUrl) {
+        throw new Error("openThreadPostPage: postUrl is required");
+    }
+
+    console.log(`[thread][post] opening ${postUrl}`);
+
+    await page.goto(postUrl, {
+        waitUntil: "domcontentloaded",
+        timeout: 30000,
+    });
+
+    await sleep(1200);
+}
+
+/** ****************************************************************************
+ * 게시글 상세 페이지에서 답글 버튼 클릭
+ *
+ * 기준:
+ *  - 페이지 전체에서 svg[aria-label="답글"] 또는 svg[aria-label="Reply"] 탐색
+ *  - 해당 svg를 포함하는 가장 가까운 role="button" div 클릭
+ *
+ * 주의:
+ *  - 검색 결과 카드 내부가 아니라 게시글 상세 페이지 기준이다.
+ ******************************************************************************/
+async function openReplyModalFromPostPage(page, timeoutMs = 15000) {
+    const startedAt = Date.now();
+
+    while (Date.now() - startedAt < timeoutMs) {
+        const result = await page.evaluate(() => {
+            const isVisible = (el) => {
+                if (!el) return false;
+
+                const style = window.getComputedStyle(el);
+                const rect = el.getBoundingClientRect();
+
+                return (
+                    style.display !== "none" &&
+                    style.visibility !== "hidden" &&
+                    Number(style.opacity || "1") !== 0 &&
+                    rect.width > 0 &&
+                    rect.height > 0
+                );
+            };
+
+            const svgs = Array.from(
+                document.querySelectorAll(
+                    "svg[aria-label='답글'], svg[aria-label='Reply']",
+                ),
+            );
+
+            for (const svg of svgs) {
+                const button =
+                    svg.closest?.("div[role='button'], [role='button']") ||
+                    svg.parentElement?.closest?.("div[role='button'], [role='button']");
+
+                if (!button) continue;
+                if (!isVisible(button)) continue;
+
+                const ariaDisabled =
+                    String(button.getAttribute("aria-disabled") || "").toLowerCase() === "true";
+
+                if (ariaDisabled) continue;
+
+                button.scrollIntoView({
+                    block: "center",
+                    inline: "center",
+                    behavior: "instant",
+                });
+
+                button.click();
+
+                return {
+                    ok: true,
+                    svgCount: svgs.length,
+                    ariaLabel: svg.getAttribute("aria-label") || "",
+                };
+            }
+
+            return {
+                ok: false,
+                svgCount: svgs.length,
+                url: location.href,
+            };
+        });
+
+        if (result?.ok) {
+            console.log(
+                `[thread][post.reply] clicked ariaLabel=${result.ariaLabel} svgCount=${result.svgCount}`,
+            );
+
+            await sleep(700);
+            return true;
+        }
+
+        console.log(
+            `[thread][post.reply] waiting svgCount=${result?.svgCount || 0} url=${result?.url || page.url()}`,
+        );
+
+        await sleep(300);
+    }
+
+    throw new Error("THREAD_POST_REPLY_BUTTON_NOT_FOUND");
+}
+
+/** ****************************************************************************
+ * 게시글 상세 페이지 작업 후 검색 결과 페이지로 복귀
+ *
+ * 역할:
+ *  - 상세 페이지로 이동해서 댓글을 단 뒤
+ *  - 다시 검색 결과 페이지로 돌아와 다음 후보 탐색을 계속한다.
+ ******************************************************************************/
+async function restoreThreadSearchPage(page, returnUrl) {
+    if (!returnUrl) return;
+
+    try {
+        await page.goBack({
+            waitUntil: "domcontentloaded",
+            timeout: 15000,
+        });
+
+        await sleep(900);
+
+        const currentUrl = page.url();
+
+        if (currentUrl.includes("/search")) {
+            console.log(`[thread][post] restored by goBack url=${currentUrl}`);
+            return;
+        }
+    } catch {
+        /** fallback에서 직접 이동 */
+    }
+
+    console.log(`[thread][post] restoring by goto url=${returnUrl}`);
+
+    await page.goto(returnUrl, {
+        waitUntil: "domcontentloaded",
+        timeout: 30000,
+    });
+
+    await sleep(1200);
 }
 
 /** ****************************************************************************
  * 댓글 모달 editor 대기
  ******************************************************************************/
+/** ****************************************************************************
+ * 답글 editor 대기 및 포커스
+ *
+ * 변경된 Threads 동작:
+ *  - 답글 버튼 클릭 후 상세 페이지로 이동하면서 inline textbox가 이미 준비된다.
+ *  - 더 이상 dialog 내부 editor만 찾으면 안 된다.
+ ******************************************************************************/
 async function waitForReplyEditor(page, timeoutMs = 15000) {
-    const selectors = [
-        "[role='dialog'] [role='textbox']",
-        "[role='dialog'] [contenteditable='true']",
-        "[role='dialog'] textarea",
-    ];
-
     const startedAt = Date.now();
 
     while (Date.now() - startedAt < timeoutMs) {
-        for (const selector of selectors) {
-            const exists = await page.evaluate((sel) => {
-                return Boolean(document.querySelector(sel));
-            }, selector);
+        const result = await page.evaluate(() => {
+            const isVisible = (el) => {
+                if (!el) return false;
 
-            if (exists) {
-                return selector;
+                const style = window.getComputedStyle(el);
+                const rect = el.getBoundingClientRect();
+
+                return (
+                    style.display !== "none" &&
+                    style.visibility !== "hidden" &&
+                    Number(style.opacity || "1") !== 0 &&
+                    rect.width > 0 &&
+                    rect.height > 0
+                );
+            };
+
+            const editors = Array.from(
+                document.querySelectorAll(
+                    [
+                        "div[role='textbox'][contenteditable='true']",
+                        "div[role='textbox'][contenteditable='']",
+                        "[data-lexical-editor='true'][role='textbox']",
+                    ].join(","),
+                ),
+            ).filter(isVisible);
+
+            const scored = editors
+                .map((editor) => {
+                    const ariaLabel = String(editor.getAttribute("aria-label") || "");
+                    const ariaPlaceholder = String(editor.getAttribute("aria-placeholder") || "");
+                    const text = `${ariaLabel} ${ariaPlaceholder}`;
+
+                    let score = 0;
+
+                    if (text.includes("답글")) score += 100;
+                    if (text.toLowerCase().includes("reply")) score += 100;
+                    if (editor.getAttribute("data-lexical-editor") === "true") score += 30;
+                    if (document.activeElement === editor) score += 50;
+                    if (ariaLabel.includes("텍스트 필드")) score += 10;
+
+                    return {
+                        editor,
+                        score,
+                        ariaLabel,
+                        ariaPlaceholder,
+                    };
+                })
+                .sort((a, b) => b.score - a.score);
+
+            const picked = scored[0];
+
+            if (!picked?.editor) {
+                return {
+                    ok: false,
+                    editorCount: editors.length,
+                };
             }
+
+            picked.editor.scrollIntoView({
+                block: "center",
+                inline: "center",
+                behavior: "instant",
+            });
+
+            picked.editor.focus();
+            picked.editor.click();
+
+            return {
+                ok: true,
+                editorCount: editors.length,
+                score: picked.score,
+                ariaLabel: picked.ariaLabel,
+                ariaPlaceholder: picked.ariaPlaceholder,
+            };
+        });
+
+        if (result?.ok) {
+            console.log(
+                `[thread][reply.editor] focused score=${result.score} editorCount=${result.editorCount} ariaPlaceholder=${result.ariaPlaceholder || "(없음)"}`
+            );
+
+            await sleep(200);
+            return true;
         }
 
-        await sleep(200);
+        console.log(
+            `[thread][reply.editor] waiting editorCount=${result?.editorCount || 0}`
+        );
+
+        await sleep(300);
     }
 
     throw new Error("THREAD_REPLY_EDITOR_NOT_FOUND");
@@ -576,10 +883,11 @@ async function waitForReplyEditor(page, timeoutMs = 15000) {
  * 댓글 입력
  ******************************************************************************/
 async function typeReplyText(page, commentText) {
-    const selector = await waitForReplyEditor(page);
+    if (!commentText) {
+        throw new Error("typeReplyText: commentText is required");
+    }
 
-    await page.click(selector, { delay: 30 }).catch(() => { });
-    await sleep(120);
+    await waitForReplyEditor(page, 15000);
 
     /** --------------------------------------------------------------------------
      * 기존 텍스트 선택 후 삭제
@@ -588,64 +896,171 @@ async function typeReplyText(page, commentText) {
     await page.keyboard.press("KeyA");
     await page.keyboard.up("Control");
     await page.keyboard.press("Backspace");
-    await sleep(60);
+    await sleep(80);
 
     /** --------------------------------------------------------------------------
      * 댓글 입력
      * ----------------------------------------------------------------------- */
     await page.keyboard.type(String(commentText || ""), { delay: 12 });
-    await sleep(150);
+    await sleep(300);
 }
 
 /** ****************************************************************************
  * 댓글 게시 버튼 클릭
  *
- * 기준:
- *  - 모달 내부에서 '게시' 텍스트를 가진 노드 탐색
- *  - 상위 role=button 클릭
+ * 변경된 Threads 동작:
+ *  - 게시 버튼이 dialog 안이 아닐 수 있다.
+ *  - 현재 활성화된 reply editor 주변에서 먼저 찾고, 실패하면 페이지 전체에서 찾는다.
  ******************************************************************************/
-async function submitReply(page) {
-    const clicked = await page.evaluate(() => {
-        const dialog = document.querySelector("[role='dialog']");
-        if (!dialog) return false;
+async function submitReply(page, timeoutMs = 15000) {
+    const startedAt = Date.now();
 
-        const all = Array.from(dialog.querySelectorAll("*"));
+    while (Date.now() - startedAt < timeoutMs) {
+        const clicked = await page.evaluate(() => {
+            const isVisible = (el) => {
+                if (!el) return false;
 
-        for (const node of all) {
-            const text = String(node.textContent || "").trim();
-            if (text !== "게시" && text.toLowerCase() !== "post") {
-                continue;
+                const style = window.getComputedStyle(el);
+                const rect = el.getBoundingClientRect();
+
+                return (
+                    style.display !== "none" &&
+                    style.visibility !== "hidden" &&
+                    Number(style.opacity || "1") !== 0 &&
+                    rect.width > 0 &&
+                    rect.height > 0
+                );
+            };
+
+            const isEnabled = (el) => {
+                const ariaDisabled =
+                    String(el.getAttribute?.("aria-disabled") || "").toLowerCase() === "true";
+
+                return !el.disabled && !ariaDisabled;
+            };
+
+            const isSubmitButton = (el) => {
+                const text = String(el.textContent || "").trim().toLowerCase();
+
+                return (
+                    text === "게시" ||
+                    text === "답글" ||
+                    text === "post" ||
+                    text === "comment"
+                );
+            };
+
+            const clickButtonInRoot = (root) => {
+                if (!root) return false;
+
+                const buttons = Array.from(
+                    root.querySelectorAll("[role='button'], button"),
+                );
+
+                for (const button of buttons) {
+                    if (!isVisible(button)) continue;
+                    if (!isEnabled(button)) continue;
+                    if (!isSubmitButton(button)) continue;
+
+                    button.scrollIntoView({
+                        block: "center",
+                        inline: "center",
+                        behavior: "instant",
+                    });
+
+                    button.click();
+                    return true;
+                }
+
+                return false;
+            };
+
+            const activeEditor =
+                document.activeElement?.closest?.("div[role='textbox'][contenteditable]") ||
+                document.querySelector("div[role='textbox'][contenteditable][aria-placeholder*='답글']") ||
+                document.querySelector("div[role='textbox'][contenteditable][aria-placeholder*='reply' i]") ||
+                document.querySelector("[data-lexical-editor='true'][role='textbox']");
+
+            /** ------------------------------------------------------------------
+             * 1) editor 주변 ancestor에서 우선 탐색
+             * ---------------------------------------------------------------- */
+            let current = activeEditor;
+
+            for (let i = 0; i < 8 && current; i += 1) {
+                if (clickButtonInRoot(current)) {
+                    return true;
+                }
+
+                current = current.parentElement;
             }
 
-            const button =
-                node.getAttribute?.("role") === "button"
-                    ? node
-                    : node.closest?.("[role='button'], button");
+            /** ------------------------------------------------------------------
+             * 2) dialog fallback
+             * ---------------------------------------------------------------- */
+            const dialog = document.querySelector("[role='dialog']");
+            if (clickButtonInRoot(dialog)) {
+                return true;
+            }
 
-            if (!button) continue;
+            /** ------------------------------------------------------------------
+             * 3) page 전체 fallback
+             * ---------------------------------------------------------------- */
+            return clickButtonInRoot(document);
+        });
 
-            button.scrollIntoView({
-                block: "center",
-                inline: "center",
-                behavior: "instant",
-            });
-
-            button.click();
+        if (clicked) {
+            console.log("[thread][reply.submit] clicked");
+            await sleep(1200);
             return true;
         }
 
-        return false;
-    });
-
-    if (!clicked) {
-        throw new Error("THREAD_REPLY_SUBMIT_BUTTON_NOT_FOUND");
+        await sleep(300);
     }
+
+    throw new Error("THREAD_REPLY_SUBMIT_BUTTON_NOT_FOUND");
+}
+
+/** ****************************************************************************
+ * 댓글 작성 후 검색 결과 페이지로 복귀
+ ******************************************************************************/
+async function restoreThreadSearchPage(page, returnUrl) {
+    if (!returnUrl) return;
+
+    try {
+        await page.goBack({
+            waitUntil: "domcontentloaded",
+            timeout: 15000,
+        });
+
+        await sleep(900);
+
+        if (page.url().includes("/search")) {
+            console.log(`[thread][restore] goBack success url=${page.url()}`);
+            return;
+        }
+    } catch {
+        /** goBack 실패 시 직접 이동 */
+    }
+
+    console.log(`[thread][restore] goto ${returnUrl}`);
+
+    await page.goto(returnUrl, {
+        waitUntil: "domcontentloaded",
+        timeout: 30000,
+    });
 
     await sleep(1200);
 }
 
 /** ****************************************************************************
  * 한 feed item에 댓글 작성
+ *
+ * 변경된 Threads 동작 대응:
+ *  1) 검색 결과 카드의 답글 버튼 클릭
+ *  2) 게시글 상세 페이지로 이동
+ *  3) 이미 활성화된 inline reply textbox에 바로 입력
+ *  4) 게시
+ *  5) 검색 결과 페이지로 복귀
  ******************************************************************************/
 async function commentOnThreadFeedItem(page, { postUrl, commentText }) {
     if (!postUrl) {
@@ -656,13 +1071,21 @@ async function commentOnThreadFeedItem(page, { postUrl, commentText }) {
         throw new Error("commentOnThreadFeedItem: commentText is required");
     }
 
-    await openReplyModalFromFeed(page, postUrl);
-    await sleep(500);
+    const returnUrl = page.url();
 
-    await typeReplyText(page, commentText);
-    await submitReply(page);
+    try {
+        await openReplyModalFromFeed(page, postUrl);
+        await typeReplyText(page, commentText);
+        await submitReply(page);
 
-    return true;
+        return true;
+    } finally {
+        await restoreThreadSearchPage(page, returnUrl).catch((error) => {
+            console.log(
+                `[thread][restore] failed: ${String(error?.message || error)}`
+            );
+        });
+    }
 }
 
 /** ****************************************************************************
