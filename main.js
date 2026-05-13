@@ -354,6 +354,28 @@ function inferRuntimeStatusFromLog(key, message) {
     }
   }
 
+  if (key === "instagram") {
+    if (msg.includes("[runInstagram] waiting for manual login")) {
+      return "waiting_login";
+    }
+
+    if (
+      msg.includes("[runInstagram] login detected") ||
+      msg.includes("[insta] create flow") ||
+      msg.includes("[insta] upload image") ||
+      msg.includes("[insta] caption + share")
+    ) {
+      return "running";
+    }
+
+    if (
+      msg.includes("[runInstagram] ✅ done") ||
+      msg.includes("[runInstagram] entering post-run-standby")
+    ) {
+      return "standby";
+    }
+  }
+
   return null;
 }
 
@@ -735,6 +757,16 @@ async function startBot(key, options = {}) {
     if (typeof cfg.exploreMinutes !== "undefined") {
       env.THREAD_EXPLORE_MINUTES = String(cfg.exploreMinutes);
     }
+  }
+
+  /** ------------------------------------------------------------------------
+  * Instagram 옵션
+  * ---------------------------------------------------------------------- */
+  if (key === "instagram" && options.instagramConfig) {
+    const cfg = options.instagramConfig;
+
+    if (cfg.caption) env.INSTA_CAPTION = cfg.caption;
+    if (cfg.imagePath) env.INSTA_IMAGE_PATH = cfg.imagePath;
   }
 
   const child = utilityProcess.fork(def.runnerPath, [], {

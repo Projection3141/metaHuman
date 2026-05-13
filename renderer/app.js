@@ -39,6 +39,12 @@ const state = {
       exploreMinutes: 10,
       userDataDirMode: "persistent",
     },
+
+    instagram: {
+      caption: "퓨마냥이",
+      imagePath: "public\\assets\\image\\cat.jpg",
+      userDataDirMode: "persistent",
+    },
   },
 };
 
@@ -287,24 +293,24 @@ function renderBotConfig() {
         />
       </div>
 
-  <div class="bot-config-row">
-    <label for="thread-comment-language">댓글 언어</label>
-    <select id="thread-comment-language" class="select">
-      <option value="ko" ${state.config.thread.commentLanguage === "ko" ? "selected" : ""}>한국어</option>
-      <option value="zh" ${state.config.thread.commentLanguage === "zh" ? "selected" : ""}>중국어</option>
-      <option value="ja" ${state.config.thread.commentLanguage === "ja" ? "selected" : ""}>일본어</option>
-      <option value="en" ${state.config.thread.commentLanguage === "en" ? "selected" : ""}>영어</option>
-    </select>
-  </div>
+      <div class="bot-config-row">
+        <label for="thread-comment-language">댓글 언어</label>
+        <select id="thread-comment-language" class="select">
+          <option value="ko" ${state.config.thread.commentLanguage === "ko" ? "selected" : ""}>한국어</option>
+          <option value="zh" ${state.config.thread.commentLanguage === "zh" ? "selected" : ""}>중국어</option>
+          <option value="ja" ${state.config.thread.commentLanguage === "ja" ? "selected" : ""}>일본어</option>
+          <option value="en" ${state.config.thread.commentLanguage === "en" ? "selected" : ""}>영어</option>
+        </select>
+      </div>
 
-  <div class="bot-config-row">
-    <label for="thread-recommend-link">추천 링크</label>
-    <input
-      id="thread-recommend-link"
-      placeholder="http://monio.co.kr/"
-      value="${escapeHtml(state.config.thread.recommendLink)}"
-    />
-  </div>
+      <div class="bot-config-row">
+        <label for="thread-recommend-link">추천 링크</label>
+        <input
+          id="thread-recommend-link"
+          placeholder="http://monio.co.kr/"
+          value="${escapeHtml(state.config.thread.recommendLink)}"
+        />
+      </div>
 
       <div class="bot-config-row">
         <label for="thread-user-data-dir-mode">로그인 방식</label>
@@ -322,6 +328,41 @@ function renderBotConfig() {
       </div>
 
     </div>
+
+    <div id="instagram-config" class="${state.config.target !== "instagram" ? "hidden" : ""}">
+      <div class="bot-config-row">
+        <label for="instagram-caption">캡션</label>
+        <input
+          id="instagram-caption"
+          placeholder="테스트 업로드"
+          value="${escapeHtml(state.config.instagram.caption)}"
+        />
+      </div>
+
+      <div class="bot-config-row">
+        <label for="instagram-image-path">이미지 경로</label>
+        <input
+          id="instagram-image-path"
+          placeholder="public\\assets\\image\\cat.jpg"
+          value="${escapeHtml(state.config.instagram.imagePath)}"
+        />
+      </div>
+
+      <div class="bot-config-row">
+        <label for="instagram-user-data-dir-mode">로그인 방식</label>
+        <select id="instagram-user-data-dir-mode" class="select">
+          <option value="persistent" ${state.config.instagram.userDataDirMode === "persistent" ? "selected" : ""}>
+            로그인 유지
+          </option>
+          <option value="temp" ${state.config.instagram.userDataDirMode === "temp" ? "selected" : ""}>
+            새 로그인 1회
+          </option>
+          <option value="promote" ${state.config.instagram.userDataDirMode === "promote" ? "selected" : ""}>
+            새 로그인 후 유지
+          </option>
+        </select>
+      </div>
+    </div>
   `;
 }
 
@@ -336,6 +377,7 @@ function updateBotConfigUI() {
   const targetSelect = document.getElementById("target-select");
   const redditConfig = document.getElementById("reddit-config");
   const threadConfig = document.getElementById("thread-config");
+  const instagramConfig = document.getElementById("instagram-config");
 
   if (targetSelect) {
     targetSelect.value = state.config.target;
@@ -385,6 +427,20 @@ function updateBotConfigUI() {
     if (recommendLink) recommendLink.value = state.config.thread.recommendLink;
     if (loginKeepToggle) { loginKeepToggle.checked = state.config.thread.userDataDirMode === "persistent"; }
     if (threadUserDataDirMode) { threadUserDataDirMode.value = normalizeUserDataDirMode(state.config.thread.userDataDirMode); }
+  }
+
+  if (instagramConfig) {
+    instagramConfig.classList.toggle("hidden", state.config.target !== "instagram");
+
+    const caption = document.getElementById("instagram-caption");
+    const imagePath = document.getElementById("instagram-image-path");
+    const instagramUserDataDirMode = document.getElementById("instagram-user-data-dir-mode");
+
+    if (caption) caption.value = state.config.instagram.caption;
+    if (imagePath) imagePath.value = state.config.instagram.imagePath;
+    if (instagramUserDataDirMode) {
+      instagramUserDataDirMode.value = normalizeUserDataDirMode(state.config.instagram.userDataDirMode);
+    }
   }
 }
 
@@ -486,6 +542,24 @@ function handleBotConfigInput(event) {
 
   if (id === "thread-user-data-dir-mode") {
     state.config.thread.userDataDirMode = normalizeUserDataDirMode(value);
+    return;
+  }
+
+  /**
+   * 4) instagram 설정
+   */
+  if (id === "instagram-caption") {
+    state.config.instagram.caption = value;
+    return;
+  }
+
+  if (id === "instagram-image-path") {
+    state.config.instagram.imagePath = value;
+    return;
+  }
+
+  if (id === "instagram-user-data-dir-mode") {
+    state.config.instagram.userDataDirMode = normalizeUserDataDirMode(value);
     return;
   }
 }
@@ -615,10 +689,10 @@ function validateBotConfig(key) {
     const cfg = state.config.reddit;
 
     if (
-      !cfg.subreddit || 
-      !cfg.keyword || 
-      !cfg.recommendLink || 
-      !cfg.commentLanguage || 
+      !cfg.subreddit ||
+      !cfg.keyword ||
+      !cfg.recommendLink ||
+      !cfg.commentLanguage ||
       !isPositiveNumber(cfg.commentCount)
     ) {
       return {
@@ -680,6 +754,18 @@ function buildStartOptions(key) {
     options.threadConfig = {
       ...state.config.thread,
     };
+    return options;
+  }
+
+  if (key === "instagram") {
+    options.userDataDirMode = normalizeUserDataDirMode(
+      state.config.instagram.userDataDirMode,
+    );
+
+    options.instagramConfig = {
+      ...state.config.instagram,
+    };
+
     return options;
   }
 
